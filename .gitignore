@@ -1,0 +1,20 @@
+# 测试
+examples/
+test/
+
+# 日志
+*.log
+logs/
+*.logs
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+remote-server.conf
