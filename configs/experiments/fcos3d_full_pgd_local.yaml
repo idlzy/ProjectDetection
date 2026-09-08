@@ -1,0 +1,8 @@
+_base_: fcos3d_full_pgd.yaml
+
+experiment:
+  name: fcos3d_mw3d_local_full_pgd
+
+data:
+  data_root: /home/gy-zb-a-luziyang/datasets/mw3d
+  ready_root: /home/gy-zb-a-luziyang/datasets/mw3d

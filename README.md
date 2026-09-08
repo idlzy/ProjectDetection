@@ -135,10 +135,13 @@ conda run -n ai python tools/convert_checkpoint.py \
 CUDA_VISIBLE_DEVICES=0 scripts/start_train.sh \
   --config configs/experiments/fcos3d_r101_fpn_dcn_full_pgd_local.yaml
 
-# 远程 ready-v5
+# 远程 /media/datasets/lzy/mw3d（容器内映射路径）
 CUDA_VISIBLE_DEVICES=0 scripts/start_train.sh \
   --config configs/experiments/fcos3d_r101_fpn_dcn_full_pgd.yaml
 ```
+
+远程宿主机数据目录 `/media/datasets/lzy/mw3d` 在训练容器中挂载为
+`/data/horizon_j5/data/lzy/mw3d`；远程 R101 配置使用后一个容器路径。
 
 推理和 ONNX 导出：
 

@@ -1,0 +1,35 @@
+_base_: fcos3d_exp.yaml
+
+experiment:
+  name: fcos3d_mw3d_lzy_r101_fpn_dcn
+
+model:
+  # Public FCOS3D architecture: Caffe-style ResNet-101 + FPN (P3--P7).
+  backbone: resnet101_fcos3d
+  neck: fpn
+  neck_channels: 256
+  # Public FCOS3D DCN variant enables DCNv2 in ResNet stages C4 and C5.
+  backbone_dcn_stages: [false, false, true, true]
+  deform_groups: 1
+  # Keep a randomly initialized backbone trainable. When a compatible Caffe
+  # pretrained checkpoint is connected, use 1/true to match the recipe.
+  backbone_frozen_stages: -1
+  backbone_norm_eval: false
+  head_channels: 256
+  stacked_convs: 2
+  head_norm: group
+  dcn_on_last_conv: true
+
+data:
+  # Host /media/datasets/lzy/mw3d is mounted here inside the training container.
+  data_root: /data/horizon_j5/data/lzy/mw3d
+  ready_root: /data/horizon_j5/data/lzy/mw3d
+  # ResNet-101 + DCN is substantially larger than the existing B0 baseline.
+  batch_size_per_gpu: 2
+  # Detectron2/MSRA Caffe weights use BGR order and mean subtraction only.
+  image_mean: [103.530, 116.280, 123.675]
+  image_std: [1.0, 1.0, 1.0]
+  pad_value: [103.530, 116.280, 123.675]
+
+train:
+  pretrain: checkpoints/pretrained/resnet101_msra_project_detection.pth

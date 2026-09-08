@@ -1,0 +1,77 @@
+experiment:
+  name: fcos3d_mw3d_ready_v5_bgr_exp_pgda
+  output_dir: outputs
+  seed: 3407
+
+data:
+  data_root: /data/horizon_j5/data/mw3d_v5_data
+  ready_root: /data/horizon_j5/data/mw3d_ready_v5
+  image_size: [512, 896]
+  color_space: bgr
+  image_mean: [128.0, 128.0, 128.0]
+  image_std: [128.0, 128.0, 128.0]
+  pad_value: [0.0, 0.0, 0.0]
+  geometry: distorted
+  classes:
+    - Animal
+    - Dense_object
+    - Obstacle
+    - Other_obstacles
+    - Pedestrian
+    - Special_vehicle
+    - Tricycle
+    - Uncertain
+    - bus
+    - car
+    - truck
+    - two_wheeled_vehicle
+  num_workers: 4
+  batch_size_per_gpu: 4
+
+model:
+  backbone: efficientnet_b0_hat_compatible
+  neck: bifpn
+  neck_channels: 64
+  bifpn_stacks: 3
+  head_channels: 256
+  stacked_convs: 2
+  strides: [8, 16, 32, 64, 128]
+  regress_ranges: [[-1, 48], [48, 96], [96, 192], [192, 384], [384, 100000000]]
+  num_attrs: 9
+  depth_mode: exp
+  probabilistic_depth: true
+  geometric_depth: false
+  depth_bin_unit: 10.0
+  depth_bin_max: 80.0
+
+train:
+  epochs: 60
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  lr_peak_ratio: 10.0
+  lr_final_ratio: 0.0001
+  lr_warmup_fraction: 0.4
+  amp: true
+  sync_batch_norm: true
+  validate_every: 1
+  gradient_clip_norm: 10.0
+  pretrain: null
+  resume: null
+
+evaluation:
+  score_threshold: 0.05
+  nms_pre: 1000
+  nms_threshold: 0.3
+  # auto: CUDA 环境优先 Horizon 插件，否则使用独立 CPU reference 实现。
+  nms_backend: auto
+  max_per_image: 100
+  distance_thresholds: [0.5, 1.0, 2.0, 4.0]
+  depth_bins: [[0, 10], [10, 20], [20, 30], [30, 50], [50, 80], [80, 1000000]]
+
+runtime:
+  device: cuda
+  max_train_samples: null
+  max_val_samples: null
+  max_test_samples: null
+  log_every: 50
+  log_level: INFO
