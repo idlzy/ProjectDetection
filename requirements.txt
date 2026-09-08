@@ -1,0 +1,9 @@
+numpy>=1.19,<2
+opencv-python-headless>=4.6
+PyYAML>=5.4
+torch>=1.13
+torchvision>=0.14
+tqdm>=4.60
+tensorboard>=2.10
+onnx>=1.12
+onnxruntime>=1.12
