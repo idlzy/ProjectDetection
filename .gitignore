@@ -2,6 +2,26 @@
 examples/
 test/
 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+.runtime/
+*.egg-info/
+
+# 模型与实验产物
+outputs/
+checkpoints/
+*.pth
+*.pth.tar
+*.pt
+*.onnx
+*.engine
+*.npz
+
 # 日志
 *.log
 logs/
@@ -18,3 +38,4 @@ logs/
 Thumbs.db
 
 remote-server.conf
+.codex_remote_askpass.sh
