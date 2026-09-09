@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "project-detection"
 version = "0.1.0"
 description = "Standalone FCOS3D + probabilistic depth training pipeline for MW3D"
+readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.8"
 dependencies = [
   "numpy>=1.19,<2",
@@ -17,13 +18,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "onnx>=1.12", "onnxruntime>=1.12", "tensorboard>=2.10"]
+dev = [
+  "build>=0.10",
+  "pytest>=7",
+  "onnx>=1.12",
+  "onnxruntime>=1.12",
+  "tensorboard>=2.10",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["project_detection*"]
+namespaces = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,19 @@
+include README.md
+include pyproject.toml
+graft src/project_detection
+
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude *.pth
+global-exclude *.onnx
+
+prune checkpoints
+prune configs
+prune docs
+prune examples
+prune outputs
+prune scripts
+prune test
+prune tests
+prune tools

@@ -11,6 +11,8 @@ __pycache__/
 .venv/
 .runtime/
 *.egg-info/
+build/
+dist/
 
 # 模型与实验产物
 outputs/
