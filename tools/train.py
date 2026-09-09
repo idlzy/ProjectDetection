@@ -16,9 +16,25 @@ def main():
         "--set", nargs="+", action="append", default=[], dest="override_groups"
     )
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--auto-resume", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     overrides = [item for group in args.override_groups for item in group]
     config = load_config(args.config, overrides)
+    if args.auto_resume:
+        checkpoint_dir = (
+            Path(config["experiment"]["output_dir"])
+            / config["experiment"]["name"]
+            / "checkpoints"
+        )
+        candidates = [
+            path for path in (
+                checkpoint_dir / "recovery.pth",
+                checkpoint_dir / "last.pth",
+            ) if path.is_file()
+        ]
+        if candidates:
+            config["train"]["resume"] = str(max(candidates, key=lambda path: path.stat().st_mtime))
+            config["train"]["pretrain"] = None
     if args.validate_only:
         pretrain = config["train"].get("pretrain")
         if pretrain and not Path(pretrain).is_file():

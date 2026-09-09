@@ -71,10 +71,24 @@ def validate_config(config: Dict[str, Any]) -> None:
     if head_norm not in ("batch", "group", "none"):
         raise ValueError("model.head_norm must be batch, group or none")
     nms_backend = config["evaluation"].get("nms_backend", "auto")
-    if nms_backend not in ("auto", "horizon", "reference"):
-        raise ValueError("evaluation.nms_backend must be auto, horizon or reference")
+    if nms_backend not in ("auto", "horizon", "cuda", "reference"):
+        raise ValueError(
+            "evaluation.nms_backend must be auto, horizon, cuda or reference"
+        )
     if config["train"].get("validate_every", 1) < 1:
         raise ValueError("train.validate_every must be at least 1")
+    if not isinstance(config["train"].get("nonfinite_guard", True), bool):
+        raise ValueError("train.nonfinite_guard must be true or false")
+    if config["train"].get("nonfinite_parameter_check_every", 100) < 1:
+        raise ValueError("train.nonfinite_parameter_check_every must be at least 1")
+    if config["train"].get("nonfinite_max_consecutive_amp_overflows", 8) < 1:
+        raise ValueError(
+            "train.nonfinite_max_consecutive_amp_overflows must be at least 1"
+        )
+    if config["train"].get("amp_initial_scale", 2048.0) <= 0:
+        raise ValueError("train.amp_initial_scale must be greater than 0")
+    if config["train"].get("recovery_checkpoint_every_steps", 100) < 0:
+        raise ValueError("train.recovery_checkpoint_every_steps must be non-negative")
     if config["runtime"].get("log_every", 1) < 1:
         raise ValueError("runtime.log_every must be at least 1")
     geometry = config["model"].get("geometry", {})

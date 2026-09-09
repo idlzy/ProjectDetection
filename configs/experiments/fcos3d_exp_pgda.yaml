@@ -52,9 +52,18 @@ train:
   lr_final_ratio: 0.0001
   lr_warmup_fraction: 0.4
   amp: true
+  # 65536 overflows on the first backward pass of the R101 + DCN model.
+  amp_initial_scale: 2048.0
   sync_batch_norm: true
   validate_every: 1
   gradient_clip_norm: 10.0
+  # Stop before NaN/Inf values can overwrite the latest healthy checkpoint.
+  nonfinite_guard: true
+  nonfinite_parameter_check_every: 100
+  nonfinite_max_consecutive_amp_overflows: 8
+  # Overwrite one recovery checkpoint periodically for crash auto-resume.
+  # Set to 0 to disable step-level recovery checkpoints.
+  recovery_checkpoint_every_steps: 100
   pretrain: null
   resume: null
 

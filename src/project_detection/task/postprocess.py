@@ -5,6 +5,7 @@ import math
 import numpy as np
 import torch
 
+from ..ops import nms_rotated as _project_cuda_nms_rotated
 from .depth_propagation import propagate_geometric_depth, undistort_points
 from .targets import feature_points
 
@@ -103,7 +104,7 @@ def rotated_bev_nms(boxes3d, scores, threshold, backend="auto"):
         boxes3d: Camera boxes in ``[x,y,z,l,h,w,yaw,vx,vz]`` order.
         scores: Ranking score for each box.
         threshold: Rotated IoU suppression threshold.
-        backend: ``auto``, ``horizon`` or ``reference``.
+        backend: ``auto``, ``horizon``, ``cuda`` or ``reference``.
     """
     use_horizon = backend == "horizon" or (
         backend == "auto" and boxes3d.is_cuda and _horizon_nms_rotated is not None
@@ -120,7 +121,18 @@ def rotated_bev_nms(boxes3d, scores, threshold, backend="auto"):
             boxes_xywhr, scores.contiguous(), threshold, clockwise=True
         )
         return keep.long()
-    if backend not in ("auto", "reference"):
+    use_project_cuda = backend == "cuda" or (
+        backend == "auto" and boxes3d.is_cuda
+    )
+    if use_project_cuda:
+        if not boxes3d.is_cuda:
+            raise RuntimeError("Project rotated CUDA NMS requires CUDA tensors")
+        boxes_xywhr = boxes3d[:, [0, 2, 3, 5, 6]].contiguous()
+        _, keep = _project_cuda_nms_rotated(
+            boxes_xywhr, scores.contiguous(), threshold, clockwise=True
+        )
+        return keep.long()
+    if backend not in ("auto", "reference", "cuda"):
         raise ValueError("Unknown NMS backend: %s" % backend)
     return _reference_rotated_bev_nms(boxes3d, scores, threshold)
 
@@ -169,6 +181,18 @@ class FCOS3DPostProcessor:
                     raw[:, 2], probability
                 )
                 flat_scores = flat_scores * depth_confidence
+                # The externally reported PGDA score includes depth confidence.
+                # Apply the threshold again after fusion so visualization and
+                # evaluation never contain scores below score_threshold.
+                final_keep = flat_scores >= self.score_threshold
+                if not final_keep.any():
+                    continue
+                flat_scores = flat_scores[final_keep]
+                class_ids = class_ids[final_keep]
+                locations = locations[final_keep]
+                raw = raw[final_keep]
+                local_depth = local_depth[final_keep]
+                depth_confidence = depth_confidence[final_keep]
                 points = feature_points(height, width, stride, raw.device)[locations]
                 centers2d = points + raw[:, :2] * stride
                 cls_vectors = cls.permute(1, 2, 0).reshape(-1, cls.shape[0])[locations]

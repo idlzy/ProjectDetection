@@ -47,8 +47,8 @@ fi
 echo "Using Python: ${python_bin}"
 "${python_bin}" -u tools/train.py "$@" --validate-only
 
-nohup bash -c 'exec -a DetectionTrain "$1" -u tools/train.py "${@:2}"' \
-    DetectionTrain "${python_bin}" "$@" \
+nohup bash -c 'exec -a DetectionTrain bash "$1" "${@:2}"' \
+    DetectionTrain "${PROJECT_ROOT}/scripts/train_supervisor.sh" "${python_bin}" "$@" \
     </dev/null >/dev/null 2>&1 &
 train_pid=$!
 echo "${train_pid}" > "${PID_FILE}"

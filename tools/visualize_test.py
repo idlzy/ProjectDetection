@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 import cv2
@@ -11,7 +12,7 @@ import numpy as np
 import torch
 
 from project_detection.config import load_config
-from project_detection.data.geometry import project_distorted
+from project_detection.data.geometry import project_distorted, vehicle_box_corners
 from project_detection.engine import build_loader, load_checkpoint
 from project_detection.models import build_model
 from project_detection.task import FCOS3DPostProcessor
@@ -33,10 +34,64 @@ def draw_label(image, text, origin, color):
     cv2.putText(image, text, (x + 2, y - baseline - 1), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
 
 
-def camera_box_corners(box):
+def camera_box_corners(
+    box, camera_to_vehicle_rotation=None, camera_to_vehicle_translation=None
+):
+    """Build camera-frame corners for the project's gravity-aligned 3D box.
+
+    The stored yaw is derived from a vehicle-frame, ground-aligned heading.  A
+    camera on the vehicle is generally rolled/pitched, so constructing a box
+    by rotating around camera Y makes its vertical edges disagree with the
+    road plane.  When calibration is supplied, recover the vehicle heading,
+    construct the cuboid there, and transform all corners back to the camera.
+
+    The calibration-free branch is retained for callers using conventional
+    camera-frame boxes.
+    """
     x, y, z, length, height, width, yaw = [
         float(value) for value in box[:7]
     ]
+    if (camera_to_vehicle_rotation is None) != (
+        camera_to_vehicle_translation is None
+    ):
+        raise ValueError("camera rotation and translation must be supplied together")
+    if camera_to_vehicle_rotation is not None:
+        r_c2v = np.asarray(camera_to_vehicle_rotation, dtype=np.float64)
+        t_c2v = np.asarray(camera_to_vehicle_translation, dtype=np.float64)
+        center_c = np.asarray([x, y, z], dtype=np.float64)
+        center_v = r_c2v @ center_c + t_c2v
+
+        # build_targets stores theta=-camera_yaw, where
+        # theta=atan2(heading_camera.z, heading_camera.x).  Invert that exact
+        # 2-D direction mapping instead of assuming a level camera.
+        heading_projection = np.asarray(
+            [
+                [r_c2v[0, 0], r_c2v[1, 0]],
+                [r_c2v[0, 2], r_c2v[1, 2]],
+            ],
+            dtype=np.float64,
+        )
+        try:
+            heading_v = np.linalg.solve(
+                heading_projection,
+                np.asarray([math.cos(yaw), math.sin(yaw)], dtype=np.float64),
+            )
+        except np.linalg.LinAlgError:
+            # Degenerate mounting geometry is unlikely, but least-squares
+            # gives a stable diagnostic visualization instead of crashing.
+            heading_v = np.linalg.lstsq(
+                heading_projection,
+                np.asarray([math.cos(yaw), math.sin(yaw)], dtype=np.float64),
+                rcond=None,
+            )[0]
+        yaw_v = math.atan2(float(heading_v[1]), float(heading_v[0]))
+        corners_v = vehicle_box_corners(
+            center_v,
+            np.asarray([length, width, height], dtype=np.float64),
+            yaw_v,
+        )
+        return (r_c2v.T @ (corners_v - t_c2v.reshape(1, 3)).T).T
+
     local = np.asarray(
         [[-length / 2, -height / 2, -width / 2],
          [length / 2, -height / 2, -width / 2],
@@ -64,7 +119,11 @@ CUBOID_EDGES = (
 
 
 def project_camera_box(box, target):
-    corners = camera_box_corners(box)
+    corners = camera_box_corners(
+        box,
+        target["camera_to_vehicle_rotation"].numpy(),
+        target["camera_to_vehicle_translation"].numpy(),
+    )
     camera_matrix = target["camera_matrix"].numpy().astype(np.float64)
     distortion = target["distortion"].numpy().astype(np.float64)
     pixels, depth = project_distorted(corners, camera_matrix, distortion)
@@ -84,15 +143,18 @@ def draw_projected_cuboid(image, pixels, depth, color, thickness=2):
     return rounded, valid
 
 
-def draw_camera_view(image, target, result, classes, max_detections):
-    for box, label in zip(target["boxes3d"].numpy(), target["labels"]):
-        pixels, depth = project_camera_box(box, target)
-        rounded, valid = draw_projected_cuboid(
-            image, pixels, depth, (255, 120, 0), 3
-        )
-        if valid.any():
-            x, y = rounded[valid].min(axis=0).tolist()
-            draw_label(image, "GT " + classes[int(label)], (max(x, 0), max(y, 0)), (255, 120, 0))
+def draw_camera_view(
+    image, target, result, classes, max_detections, draw_ground_truth=True
+):
+    if draw_ground_truth:
+        for box, label in zip(target["boxes3d"].numpy(), target["labels"]):
+            pixels, depth = project_camera_box(box, target)
+            rounded, valid = draw_projected_cuboid(
+                image, pixels, depth, (255, 120, 0), 3
+            )
+            if valid.any():
+                x, y = rounded[valid].min(axis=0).tolist()
+                draw_label(image, "GT " + classes[int(label)], (max(x, 0), max(y, 0)), (255, 120, 0))
 
     boxes = result["boxes3d"][:max_detections].cpu()
     scores = result["scores"][:max_detections].cpu()
@@ -171,6 +233,16 @@ def evenly_spaced_indices(length, count):
     return np.linspace(0, length - 1, count, dtype=np.int64).tolist()
 
 
+def sequential_indices(length, start, count):
+    start = max(0, min(int(start), length))
+    end = length if count is None else min(length, start + max(0, int(count)))
+    return list(range(start, end))
+
+
+def safe_group_name(value):
+    return re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", str(value)).strip() or "unknown"
+
+
 def result_to_json(result, classes, max_detections):
     count = min(max_detections, len(result["scores"]))
     predictions = []
@@ -197,8 +269,15 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output-dir")
-    parser.add_argument("--max-images", type=int, default=20)
+    parser.add_argument("--max-images", type=int)
     parser.add_argument("--max-detections", type=int, default=30)
+    parser.add_argument("--start-index", type=int, default=0)
+    parser.add_argument("--sampling", choices=("sequential", "evenly"), default="sequential")
+    parser.add_argument("--layout", choices=("grouped", "paired"), default="grouped")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--save-bev", action="store_true")
+    parser.add_argument("--draw-ground-truth", action="store_true")
+    parser.add_argument("--skip-summary-json", action="store_true")
     parser.add_argument("--set", nargs="+", action="append", default=[])
     args = parser.parse_args()
     overrides = [item for group in args.set for item in group]
@@ -216,40 +295,84 @@ def main():
         config["experiment"]["output_dir"]
     ) / config["experiment"]["name"] / "visualizations" / "test"
     output_dir.mkdir(parents=True, exist_ok=True)
-    summary = []
-    for sequence, index in enumerate(
-        evenly_spaced_indices(len(dataset), min(args.max_images, len(dataset)))
-    ):
-        image_tensor, target = dataset[index]
-        with torch.no_grad():
-            result = processor(model(image_tensor.unsqueeze(0).to(device)), [target])[0]
-        original = cv2.imread(target["image_path"], cv2.IMREAD_COLOR)
-        camera = draw_camera_view(
-            original.copy(), target, result, config["data"]["classes"], args.max_detections
+    if args.sampling == "evenly":
+        count = len(dataset) if args.max_images is None else min(args.max_images, len(dataset))
+        indices = evenly_spaced_indices(len(dataset), count)
+    else:
+        indices = sequential_indices(len(dataset), args.start_index, args.max_images)
+    if not indices:
+        raise ValueError("No test frames selected")
+    summary, errors = [], []
+    generated = skipped = failed = 0
+    for sequence, index in enumerate(indices):
+        try:
+            image_tensor, target = dataset[index]
+            image_stem = Path(target["image_path"]).stem
+            if args.layout == "grouped":
+                group_dir = output_dir / safe_group_name(target["split_group"])
+                camera_path = group_dir / (image_stem + "_pred.jpg")
+                bev_path = group_dir / (image_stem + "_bev.jpg")
+            else:
+                stem = "%03d_%s" % (sequence, image_stem)
+                group_dir = output_dir
+                camera_path = group_dir / (stem + "_camera.jpg")
+                bev_path = group_dir / (stem + "_bev.jpg")
+            if camera_path.is_file() and not args.overwrite:
+                skipped += 1
+                print("[%d/%d] skip existing: %s" % (sequence + 1, len(indices), camera_path))
+                continue
+            with torch.no_grad():
+                result = processor(model(image_tensor.unsqueeze(0).to(device)), [target])[0]
+            original = cv2.imread(target["image_path"], cv2.IMREAD_COLOR)
+            camera = draw_camera_view(
+                original.copy(), target, result, config["data"]["classes"],
+                args.max_detections, args.draw_ground_truth,
+            )
+            group_dir.mkdir(parents=True, exist_ok=True)
+            if not cv2.imwrite(str(camera_path), camera):
+                raise OSError("Cannot write visualization: %s" % camera_path)
+            if args.save_bev:
+                bev = draw_bev(target, result, config["data"]["classes"], args.max_detections)
+                if not cv2.imwrite(str(bev_path), bev):
+                    raise OSError("Cannot write BEV visualization: %s" % bev_path)
+            generated += 1
+            summary.append(
+                {
+                    "dataset_index": index,
+                    "sample_token": target["sample_token"],
+                    "split_group": target["split_group"],
+                    "image_path": target["image_path"],
+                    "visualization": str(camera_path),
+                    "bev_visualization": str(bev_path) if args.save_bev else None,
+                    "predictions": result_to_json(
+                        result, config["data"]["classes"], args.max_detections
+                    ),
+                }
+            )
+            print("[%d/%d] manifest#%d %s -> %s boxes=%d" % (
+                sequence + 1, len(indices), index, Path(target["image_path"]).name,
+                camera_path, min(args.max_detections, len(result["scores"])),
+            ))
+        except Exception as error:
+            failed += 1
+            errors.append({"dataset_index": index, "error": repr(error)})
+            print("[%d/%d] ERROR manifest#%d: %s" % (sequence + 1, len(indices), index, error))
+    if errors:
+        error_path = output_dir / "errors.jsonl"
+        error_path.write_text(
+            "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in errors),
+            encoding="utf-8",
         )
-        bev = draw_bev(target, result, config["data"]["classes"], args.max_detections)
-        stem = "%03d_%s" % (sequence, Path(target["image_path"]).stem)
-        camera_path = output_dir / (stem + "_camera.jpg")
-        bev_path = output_dir / (stem + "_bev.jpg")
-        cv2.imwrite(str(camera_path), camera)
-        cv2.imwrite(str(bev_path), bev)
-        summary.append(
-            {
-                "dataset_index": index,
-                "sample_token": target["sample_token"],
-                "image_path": target["image_path"],
-                "camera_visualization": str(camera_path),
-                "bev_visualization": str(bev_path),
-                "predictions": result_to_json(
-                    result, config["data"]["classes"], args.max_detections
-                ),
-            }
-        )
-        print("[%d/%d] %s" % (sequence + 1, min(args.max_images, len(dataset)), stem))
+        print("Errors: %s" % error_path.resolve())
     summary_path = output_dir / "predictions.json"
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not args.skip_summary_json:
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print("Visualizations: %s" % output_dir.resolve())
-    print("Predictions: %s" % summary_path.resolve())
+    if not args.skip_summary_json:
+        print("Predictions: %s" % summary_path.resolve())
+    print("Done: generated=%d, existing=%d, failed=%d" % (generated, skipped, failed))
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

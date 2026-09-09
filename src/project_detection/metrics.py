@@ -63,17 +63,39 @@ class Mw3dMetric:
                 errors.append((distances[best_pos], 1-scale_iou, angle))
             else:
                 tp.append(0); fp.append(1)
-        return _average_precision(np.asarray(tp), np.asarray(fp), positives), errors
+        return (
+            _average_precision(np.asarray(tp), np.asarray(fp), positives),
+            errors,
+            int(sum(tp)),
+            positives,
+            len(detections),
+        )
 
     def compute(self):
         aps, tp_errors = [], []
         per_class = {}
+        per_class_by_distance = {}
+        threshold_aps = {str(value): [] for value in self.distance_thresholds}
+        threshold_counts = {
+            str(value): {"tp": 0, "gt": 0, "pred": 0}
+            for value in self.distance_thresholds
+        }
         for class_id, name in enumerate(self.class_names):
             class_aps = []
+            class_by_distance = {}
             for threshold in self.distance_thresholds:
-                ap, errors = self._class_at_threshold(class_id, threshold)
-                if not np.isnan(ap): class_aps.append(ap)
+                ap, errors, true_positives, positives, predictions = self._class_at_threshold(class_id, threshold)
+                threshold_key = str(threshold)
+                class_by_distance[threshold_key] = None if np.isnan(ap) else ap
+                counts = threshold_counts[threshold_key]
+                counts["tp"] += true_positives
+                counts["gt"] += positives
+                counts["pred"] += predictions
+                if not np.isnan(ap):
+                    class_aps.append(ap)
+                    threshold_aps[threshold_key].append(ap)
                 if threshold == self.tp_threshold: tp_errors.extend(errors)
+            per_class_by_distance[name] = class_by_distance
             if class_aps:
                 per_class[name] = float(np.mean(class_aps)); aps.extend(class_aps)
         mean_ap = float(np.mean(aps)) if aps else 0.0
@@ -84,4 +106,34 @@ class Mw3dMetric:
             mate = mase = maoe = float("nan")
         tp_scores = [max(0.0, 1.0-value) if np.isfinite(value) else 0.0 for value in (mate, mase, maoe)]
         nds = (5.0 * mean_ap + sum(tp_scores)) / 8.0
-        return {"NDS": nds, "mAP": mean_ap, "mATE": mate, "mASE": mase, "mAOE": maoe, "per_class_AP": per_class}
+        map_by_distance = {
+            key: float(np.mean(values)) if values else 0.0
+            for key, values in threshold_aps.items()
+        }
+        recall_by_distance = {
+            key: counts["tp"] / max(counts["gt"], 1)
+            for key, counts in threshold_counts.items()
+        }
+        tp_key = str(self.tp_threshold)
+        tp_counts = threshold_counts.get(tp_key, {"tp": 0, "gt": 0, "pred": 0})
+        mean_recall = tp_counts["tp"] / max(tp_counts["gt"], 1)
+        mean_precision = tp_counts["tp"] / max(tp_counts["pred"], 1)
+        f1 = 2 * mean_precision * mean_recall / max(mean_precision + mean_recall, 1e-12)
+        return {
+            "NDS": nds,
+            "mAP": mean_ap,
+            "mATE": mate,
+            "mASE": mase,
+            "mAOE": maoe,
+            "mRecall": mean_recall,
+            "mPrecision": mean_precision,
+            "F1": f1,
+            "num_samples": len(self.samples),
+            "num_gt": tp_counts["gt"],
+            "num_predictions": tp_counts["pred"],
+            "num_tp": tp_counts["tp"],
+            "mAP_by_distance": map_by_distance,
+            "recall_by_distance": recall_by_distance,
+            "per_class_AP": per_class,
+            "per_class_AP_by_distance": per_class_by_distance,
+        }

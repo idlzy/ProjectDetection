@@ -93,6 +93,7 @@ class Mw3dReadyDataset(Dataset):
         target["image_size"] = torch.tensor([target_h, target_w], dtype=torch.int64)
         target["sample_token"] = record.get("sample_token", record.get("stem", str(index)))
         target["ann_batch"] = record.get("ann_batch", record.get("split_group", "unknown"))
+        target["split_group"] = record.get("split_group", target["ann_batch"])
         target["image_path"] = str(image_path)
         target["scale_factor"] = float(scale)
         return tensor, target

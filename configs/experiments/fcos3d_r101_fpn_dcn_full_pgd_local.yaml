@@ -1,7 +1,7 @@
 _base_: fcos3d_r101_fpn_dcn_full_pgd.yaml
 
 experiment:
-  name: fcos3d_mw3d_local_r101_fpn_dcn_full_pgd_2
+  name: fcos3d_mw3d_local_r101_fpn_dcn_full_pgd_v3
 
 data:
   data_root: /home/gy-zb-a-luziyang/datasets/mw3d

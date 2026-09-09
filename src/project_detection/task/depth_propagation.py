@@ -67,6 +67,11 @@ def propagate_geometric_depth(
     detached by design, matching PGD's cut-off-gradient propagation stage.
     Nodes without a reliable incoming edge fall back to local depth.
     """
+    if local_depth.ndim != 1:
+        raise ValueError(
+            "local_depth must have shape [N], got %s"
+            % (tuple(local_depth.shape),)
+        )
     if local_depth.numel() < 2:
         result = local_depth.detach()
         validity = torch.zeros_like(local_depth, dtype=torch.bool)
@@ -79,18 +84,53 @@ def propagate_geometric_depth(
     confidence = depth_confidence.detach()
     device = depth.device
     count = depth.numel()
+    expected_vectors = {
+        "dimensions_height": heights,
+        "depth_confidence": confidence,
+    }
+    for name, value in expected_vectors.items():
+        if value.ndim != 1 or value.numel() != count:
+            raise ValueError(
+                "%s must have shape [%d], got %s"
+                % (name, count, tuple(value.shape))
+            )
+    if centers.ndim != 2 or tuple(centers.shape) != (count, 2):
+        raise ValueError(
+            "centers2d must have shape [%d, 2], got %s"
+            % (count, tuple(centers.shape))
+        )
+    if classes.ndim != 2 or classes.shape[0] != count:
+        raise ValueError(
+            "class_probabilities must have shape [%d, C], got %s"
+            % (count, tuple(classes.shape))
+        )
     if enabled_mask is None:
         enabled_mask = torch.ones(count, dtype=torch.bool, device=device)
     else:
         enabled_mask = enabled_mask.detach().bool()
+        if enabled_mask.ndim != 1 or enabled_mask.numel() != count:
+            raise ValueError(
+                "enabled_mask must have shape [%d], got %s"
+                % (count, tuple(enabled_mask.shape))
+            )
     if node_scores is None:
         node_scores = confidence
     else:
         node_scores = node_scores.detach()
+        if node_scores.ndim != 1 or node_scores.numel() != count:
+            raise ValueError(
+                "node_scores must have shape [%d], got %s"
+                % (count, tuple(node_scores.shape))
+            )
 
-    selected = torch.where(enabled_mask)[0]
-    if max_nodes > 0 and selected.numel() > max_nodes:
-        selected = selected[node_scores[selected].topk(max_nodes).indices]
+    # Select a bounded set directly.  Calling the one-argument torch.where on
+    # all dense FCOS positives first can enter an overflowing CUDA nonzero
+    # path on older PyTorch builds, even though the graph only needs 128 nodes.
+    selection_count = min(count, max(int(max_nodes), 0) or count)
+    selectable = enabled_mask & torch.isfinite(node_scores)
+    selection_scores = node_scores.masked_fill(~selectable, -torch.inf)
+    selected_scores, selected = selection_scores.topk(selection_count)
+    selected = selected[selected_scores.isfinite()]
     if selected.numel() < 2:
         validity = torch.zeros_like(depth, dtype=torch.bool)
         return (depth, validity) if return_validity else depth
@@ -138,7 +178,13 @@ def propagate_geometric_depth(
     valid &= relative_y.abs()[:, None] >= min_horizon_distance
     valid.fill_diagonal_(False)
     if instance_ids is not None:
-        ids = instance_ids.detach()[selected]
+        instance_ids = instance_ids.detach()
+        if instance_ids.ndim != 1 or instance_ids.numel() != count:
+            raise ValueError(
+                "instance_ids must have shape [%d], got %s"
+                % (count, tuple(instance_ids.shape))
+            )
+        ids = instance_ids[selected]
         valid &= ids[:, None] != ids[None, :]
     edge_scores = edge_scores.masked_fill(~valid, 0.0)
 

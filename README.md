@@ -65,6 +65,31 @@ python tools/test.py --config configs/experiments/fcos3d_exp_pgda.yaml \
   --checkpoint outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/checkpoints/best.pth
 ```
 
+一次性生成 test 集可视化、正式指标 JSON 和指标图表：
+
+```bash
+CHECKPOINT=checkpoints/trained/0909/best.pth \
+CONFIG=configs/experiments/fcos3d_r101_fpn_dcn_full_pgd_local.yaml \
+DEVICE_ID=0 VIZ_MAX_IMAGES=20 \
+scripts/run_test_viz_and_eval.sh
+```
+
+脚本会自动选择包含 PyTorch、OpenCV 和 PyYAML 的 Python；也可以通过
+`TEST_PYTHON=/path/to/python` 显式指定环境。
+
+结果默认写入 `outputs/test_runs/mw3d_test_<时间>/`。可视化目录与参考脚本一致，
+按 test manifest 的 `split_group` 分组，图片命名为
+`visualizations/<split_group>/<原图stem>_pred.jpg`；此外还包括 `metrics.json`
+以及 `plots/` 下的汇总柱状图、分类 AP 图和距离阈值 AP 矩阵。展示阈值默认
+为 `0.35`，完整评估阈值默认采用 `0.05`；可分别通过 `VIZ_SCORE_THR` 和
+`EVAL_SCORE_THR` 调整。`NMS_BACKEND` 默认为 `auto`：CUDA 环境优先使用
+Horizon 算子，其次使用项目内置的精确 CUDA 旋转 NMS，CPU 环境回退到 reference
+实现；也可显式设为 `horizon`、`cuda` 或 `reference`。设置
+`EVAL_MAX_SAMPLES` 可进行小规模冒烟测试。
+可视化默认覆盖完整 test 清单，设置 `VIZ_MAX_IMAGES` 可限量；已有图片默认跳过，
+`VIZ_START_INDEX` 可从指定 manifest 下标续跑，`VIZ_OVERWRITE=1` 可覆盖，
+`SAVE_BEV=1` 可额外输出 BEV 图。
+
 单卡后台训练使用内置启停脚本，不需要把终端输出重定向到日志文件：
 
 ```bash
@@ -78,6 +103,39 @@ scripts/stop_train.sh
 日志库会同时输出数据规模、完整配置、模型参数量、逐步 loss、学习率、显存、验证
 指标和 checkpoint 信息到 `outputs/<experiment>/logs/train.log`。前台直接执行
 `python3 -u tools/train.py ...` 时，相同内容也会实时显示在终端。
+
+后台启动脚本包含训练监督进程。Python 异常、段错误等导致训练进程退出时，监督
+进程会等待 30 秒并自动重启，最多重试 5 次；可通过 `TRAIN_RESTART_DELAY` 和
+`TRAIN_MAX_RESTARTS` 环境变量调整。退出码、信号和重启次数记录在
+`.runtime/DetectionTrain.status` 与 `.runtime/DetectionTrain.events.log`。Python
+无法捕获的原生崩溃栈会尽可能写入
+`outputs/<experiment>/logs/native_crash.log`。
+
+训练默认每 100 个成功 batch 原子覆盖一次 `checkpoints/recovery.pth`，其中包括
+模型、优化器、学习率调度器、AMP、epoch/step 和随机状态。自动重启会选择
+`recovery.pth` 与 `last.pth` 中较新的文件继续，因此最多重复不足 100 个 batch，
+不会从整个 epoch 开头重跑。保存间隔可调整，设置为 0 可关闭：
+
+```bash
+--set train.recovery_checkpoint_every_steps=50
+```
+
+恢复点是完整训练 checkpoint；R101 模型约需额外 600MB 磁盘空间，写入期间还会
+短暂产生同等大小的 `.tmp` 文件。若 CUDA 驱动已经进入持续 Xid 故障状态，有限
+次数自动重启仍可能全部失败，此时需要更换 GPU 或由管理员重置设备。
+
+训练默认启用 NaN/Inf 熔断：每步检查 loss 和梯度，每 100 step 以及 checkpoint
+保存前检查全部模型参数。发现非有限值时会在优化或保存前终止训练，不覆盖已有的
+`last.pth`，并将异常类型、epoch、step、学习率、AMP scale、loss 和异常张量写入
+`outputs/<experiment>/diagnostics/nonfinite_*.json`。参数全量检查间隔可以调整：
+
+```bash
+--set train.nonfinite_parameter_check_every=50
+```
+
+不建议关闭；如仅为诊断兼容性，可设置 `train.nonfinite_guard=false`。
+AMP 初始 scale 默认为 `2048`；偶发梯度溢出会跳过当前 optimizer 和 scheduler
+更新并自动降低 scale，只有连续 8 次溢出才触发熔断。
 
 启用几何深度、深度传播图和位置相关深度融合的完整 PGD 实验：
 

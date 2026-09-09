@@ -23,7 +23,7 @@ data:
   # Host /media/datasets/lzy/mw3d is mounted here inside the training container.
   data_root: /data/horizon_j5/data/lzy/mw3d
   ready_root: /data/horizon_j5/data/lzy/mw3d
-  batch_size_per_gpu: 2
+  batch_size_per_gpu: 4
   # Detectron2/MSRA Caffe weights use BGR order and mean subtraction only.
   image_mean: [103.530, 116.280, 123.675]
   image_std: [1.0, 1.0, 1.0]
