@@ -60,7 +60,12 @@ class Mw3dMetric:
                 gt = gt_boxes[best_idx]
                 scale_iou = np.prod(np.minimum(box[3:6], gt[3:6])) / max(np.prod(np.maximum(box[3:6], gt[3:6])), 1e-6)
                 angle = abs((float(box[6] - gt[6]) + math.pi) % (2*math.pi) - math.pi)
-                errors.append((distances[best_pos], 1-scale_iou, angle))
+                # Camera-coordinate depth is the z component.  Keep this
+                # separate from mATE, which is the BEV (x, z) center error.
+                absolute_depth_error = abs(float(box[2] - gt[2]))
+                errors.append(
+                    (distances[best_pos], 1-scale_iou, angle, absolute_depth_error)
+                )
             else:
                 tp.append(0); fp.append(1)
         return (
@@ -101,9 +106,9 @@ class Mw3dMetric:
         mean_ap = float(np.mean(aps)) if aps else 0.0
         if tp_errors:
             mean_errors = np.mean(np.asarray(tp_errors), axis=0)
-            mate, mase, maoe = map(float, mean_errors)
+            mate, mase, maoe, made = map(float, mean_errors)
         else:
-            mate = mase = maoe = float("nan")
+            mate = mase = maoe = made = float("nan")
         tp_scores = [max(0.0, 1.0-value) if np.isfinite(value) else 0.0 for value in (mate, mase, maoe)]
         nds = (5.0 * mean_ap + sum(tp_scores)) / 8.0
         map_by_distance = {
@@ -125,6 +130,7 @@ class Mw3dMetric:
             "mATE": mate,
             "mASE": mase,
             "mAOE": maoe,
+            "mADE": made,
             "mRecall": mean_recall,
             "mPrecision": mean_precision,
             "F1": f1,

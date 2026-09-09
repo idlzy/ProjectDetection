@@ -14,6 +14,7 @@ def test_write_test_report_creates_json_and_png_outputs(tmp_path):
         "mATE": 0.5,
         "mASE": 0.2,
         "mAOE": 0.3,
+        "mADE": 0.45,
         "mRecall": 0.6,
         "mPrecision": 0.25,
         "F1": 0.35,
@@ -32,7 +33,7 @@ def test_write_test_report_creates_json_and_png_outputs(tmp_path):
     assert report["metrics"]["NDS"] == 0.4
     assert json.loads(metric_path.read_text())["protocol"] == "mw3d_camera_bev_center_distance"
     for filename in (
-        "summary_bars.json", "summary_bars.png", "per_class_ap.json",
+        "summary_bars.json", "summary_bars.png", "tp_errors.json", "tp_errors.png", "per_class_ap.json",
         "per_class_ap.png", "map_matrix.json", "map_matrix.png", "plots_index.json",
     ):
         assert (plot_dir / filename).stat().st_size > 0

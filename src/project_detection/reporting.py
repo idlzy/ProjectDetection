@@ -32,6 +32,33 @@ def _horizontal_bars(values, title, output_path, width=1200):
     cv2.imwrite(str(output_path), canvas)
 
 
+def _error_bars(values, title, output_path, width=1200):
+    """Draw raw-valued error bars without treating errors as [0, 1] scores."""
+    finite_values = [float(value) for value in values.values() if np.isfinite(value)]
+    scale = max(finite_values, default=1.0)
+    scale = max(scale, 1e-12)
+    normalized = {
+        label: (float(value) / scale if np.isfinite(value) else 0.0)
+        for label, value in values.items()
+    }
+    labels = list(values)
+    canvas_height = max(360, 85 + 38 * len(labels))
+    canvas = np.full((canvas_height, width, 3), 250, dtype=np.uint8)
+    cv2.putText(canvas, title, (30, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (25, 25, 25), 2, cv2.LINE_AA)
+    chart_left, chart_right = 270, width - 105
+    chart_width = chart_right - chart_left
+    for index, label in enumerate(labels):
+        value = float(values[label])
+        y = 75 + index * 38
+        cv2.putText(canvas, str(label), (20, y + 17), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (45, 45, 45), 1, cv2.LINE_AA)
+        cv2.rectangle(canvas, (chart_left, y), (chart_right, y + 22), (225, 225, 225), -1)
+        end = chart_left + int(normalized[label] * chart_width)
+        cv2.rectangle(canvas, (chart_left, y), (end, y + 22), (65, 145, 235), -1)
+        text = "N/A" if not np.isfinite(value) else "%.4f" % value
+        cv2.putText(canvas, text, (chart_right + 5, y + 17), cv2.FONT_HERSHEY_SIMPLEX, 0.43, (30, 30, 30), 1, cv2.LINE_AA)
+    cv2.imwrite(str(output_path), canvas)
+
+
 def _map_matrix(metrics, output_path):
     matrix = metrics.get("per_class_AP_by_distance", {})
     classes = list(matrix)
@@ -70,13 +97,22 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
         "mPrecision@2m": metrics.get("mPrecision", 0.0),
         "F1@2m": metrics.get("F1", 0.0),
     }
+    tp_error_values = {
+        "mATE (m)": metrics.get("mATE", float("nan")),
+        "mASE": metrics.get("mASE", float("nan")),
+        "mAOE (rad)": metrics.get("mAOE", float("nan")),
+        "mADE (m)": metrics.get("mADE", float("nan")),
+    }
     files = {
         "summary": [str(plot_dir / "summary_bars.json"), str(plot_dir / "summary_bars.png")],
+        "tp_errors": [str(plot_dir / "tp_errors.json"), str(plot_dir / "tp_errors.png")],
         "per_class_ap": [str(plot_dir / "per_class_ap.json"), str(plot_dir / "per_class_ap.png")],
         "map_matrix": [str(plot_dir / "map_matrix.json"), str(plot_dir / "map_matrix.png")],
     }
     _write_json(plot_dir / "summary_bars.json", summary_values)
     _horizontal_bars(summary_values, "MW3D test summary", plot_dir / "summary_bars.png")
+    _write_json(plot_dir / "tp_errors.json", tp_error_values)
+    _error_bars(tp_error_values, "MW3D matched true-positive errors", plot_dir / "tp_errors.png")
     _write_json(plot_dir / "per_class_ap.json", metrics.get("per_class_AP", {}))
     _horizontal_bars(metrics.get("per_class_AP", {}), "Per-class mean AP", plot_dir / "per_class_ap.png")
     map_payload = {
