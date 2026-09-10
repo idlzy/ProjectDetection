@@ -1,0 +1,35 @@
+_base_: fcos3d_exp_pgda.yaml
+
+experiment:
+  name: fcos3d_mw3d_lzy_r101_fpn_dcn_exp_pgda_0909
+
+model:
+  # Full PGD depth branches come from the base config. These options switch
+  # the feature extractor to the public FCOS3D ResNet-101 + FPN DCN variant.
+  backbone: resnet101_fcos3d
+  neck: fpn
+  neck_channels: 256
+  backbone_dcn_stages: [false, false, true, true]
+  deform_groups: 1
+  # The repository does not download Caffe pretrained weights automatically.
+  backbone_frozen_stages: 1
+  backbone_norm_eval: true
+  head_channels: 256
+  stacked_convs: 2
+  head_norm: group
+  dcn_on_last_conv: false
+
+data:
+  # Host /media/datasets/lzy/mw3d is mounted here inside the training container.
+  data_root: /data/horizon_j5/data/lzy/mw3d
+  ready_root: /data/horizon_j5/data/lzy/mw3d
+  batch_size_per_gpu: 16
+  # Detectron2/MSRA Caffe weights use BGR order and mean subtraction only.
+  image_mean: [103.530, 116.280, 123.675]
+  image_std: [1.0, 1.0, 1.0]
+  pad_value: [103.530, 116.280, 123.675]
+
+train:
+  # Converted from the official nuScenes PGD/FCOS3D++ 2x finetune model.
+  # The MW3D-specific prediction layers remain freshly initialized.
+  pretrain: checkpoints/pretrained/pgd_r101_nuscenes_project_detection.pth

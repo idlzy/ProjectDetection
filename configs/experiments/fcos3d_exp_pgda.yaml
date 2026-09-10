@@ -26,7 +26,7 @@ data:
     - truck
     - two_wheeled_vehicle
   num_workers: 4
-  batch_size_per_gpu: 4
+  batch_size_per_gpu: 8
 
 model:
   backbone: efficientnet_b0_hat_compatible
@@ -34,7 +34,7 @@ model:
   neck_channels: 64
   bifpn_stacks: 3
   head_channels: 256
-  stacked_convs: 2
+  stacked_convs: 4
   strides: [8, 16, 32, 64, 128]
   regress_ranges: [[-1, 48], [48, 96], [96, 192], [192, 384], [384, 100000000]]
   num_attrs: 9
@@ -45,13 +45,13 @@ model:
   depth_bin_max: 80.0
 
 train:
-  epochs: 60
-  learning_rate: 0.0001
-  weight_decay: 0.01
-  lr_peak_ratio: 10.0
-  lr_final_ratio: 0.0001
-  lr_warmup_fraction: 0.4
-  amp: true
+  epochs: 100
+  learning_rate: 0.00001
+  weight_decay: 0.0001
+  lr_peak_ratio: 100.0
+  lr_final_ratio: 0.001
+  lr_warmup_fraction: 0.04
+  amp: false
   # 65536 overflows on the first backward pass of the R101 + DCN model.
   amp_initial_scale: 2048.0
   sync_batch_norm: true

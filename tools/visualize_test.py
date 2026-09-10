@@ -16,6 +16,10 @@ from project_detection.data.geometry import project_distorted, vehicle_box_corne
 from project_detection.engine import build_loader, load_checkpoint
 from project_detection.models import build_model
 from project_detection.task import FCOS3DPostProcessor
+from project_detection.visualization import (
+    draw_bev as draw_shared_bev,
+    draw_camera_view as draw_shared_camera_view,
+)
 
 
 def color_for_class(class_id):
@@ -324,7 +328,7 @@ def main():
             with torch.no_grad():
                 result = processor(model(image_tensor.unsqueeze(0).to(device)), [target])[0]
             original = cv2.imread(target["image_path"], cv2.IMREAD_COLOR)
-            camera = draw_camera_view(
+            camera = draw_shared_camera_view(
                 original.copy(), target, result, config["data"]["classes"],
                 args.max_detections, args.draw_ground_truth,
             )
@@ -332,7 +336,12 @@ def main():
             if not cv2.imwrite(str(camera_path), camera):
                 raise OSError("Cannot write visualization: %s" % camera_path)
             if args.save_bev:
-                bev = draw_bev(target, result, config["data"]["classes"], args.max_detections)
+                bev = draw_shared_bev(
+                    target,
+                    result,
+                    config["data"]["classes"],
+                    args.max_detections,
+                )
                 if not cv2.imwrite(str(bev_path), bev):
                     raise OSError("Cannot write BEV visualization: %s" % bev_path)
             generated += 1

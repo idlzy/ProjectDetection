@@ -17,6 +17,7 @@ dist/
 # 模型与实验产物
 outputs/
 checkpoints/
+kitti_gt/
 *.pth
 *.pth.tar
 *.pt
