@@ -1,8 +1,0 @@
-_base_: fcos3d_r101_fpn_dcn_exp_pgda.yaml
-
-experiment:
-  name: fcos3d_mw3d_lzy_r101_fpn_dcn_exp_pgda_0909_local
-
-data:
-  data_root: /home/gy-zb-a-luziyang/datasets/kitti_mw3d
-  ready_root: /home/gy-zb-a-luziyang/datasets/kitti_mw3d
