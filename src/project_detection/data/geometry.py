@@ -132,6 +132,12 @@ def build_targets(objects, calibration: Dict[str, np.ndarray], image_hw: Tuple[i
     k, dist, r_c2v, t_c2v = (calibration[key] for key in ("k", "dist", "r_c2v", "t_c2v"))
     boxes2d, centers2d, boxes3d, labels = [], [], [], []
     for obj in objects:
+        try:
+            visibility = float(obj.get("visibility", 0))
+        except (TypeError, ValueError):
+            visibility = 0.0
+        if not math.isfinite(visibility) or visibility <= 0:
+            continue
         source_flag = str(obj.get("source", {}).get("pinhole_left", 0)).lower()
         if source_flag not in ("1", "true", "yes") or obj.get("label") not in class_to_id:
             continue
