@@ -56,11 +56,9 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("model.depth_mode must be exp or linear")
     if len(config["model"]["strides"]) != 5:
         raise ValueError("FCOS3D expects five feature strides")
-    backbone = config["model"].get(
-        "backbone", "efficientnet_b0_hat_compatible"
-    )
+    backbone = config["model"].get("backbone", "efficientnet_b0")
     if backbone not in (
-        "efficientnet_b0_hat_compatible",
+        "efficientnet_b0",
         "legacy_hat_efficientnet_b0",
         "resnet101_fcos3d",
     ):

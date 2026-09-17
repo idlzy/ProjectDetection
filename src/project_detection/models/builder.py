@@ -6,7 +6,7 @@ def build_model(config):
     data = config["data"]
     return FCOS3D(
         num_classes=len(data["classes"]),
-        backbone=model.get("backbone", "efficientnet_b0_hat_compatible"),
+        backbone=model.get("backbone", "efficientnet_b0"),
         neck=model.get("neck", "bifpn"),
         neck_channels=model["neck_channels"],
         bifpn_stacks=model["bifpn_stacks"],

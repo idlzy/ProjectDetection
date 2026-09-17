@@ -36,7 +36,13 @@ class FCOS3DLoss(nn.Module):
 
     def forward(self, outputs, targets, head):
         loss_cls = outputs[0]["cls"].new_tensor(0.0)
-        loss_bbox = loss_cls.clone(); loss_dir = loss_cls.clone(); loss_center = loss_cls.clone()
+        loss_offset = loss_cls.clone()
+        loss_depth = loss_cls.clone()
+        loss_size = loss_cls.clone()
+        loss_yaw = loss_cls.clone()
+        loss_depth_cls = loss_cls.clone()
+        loss_dir = loss_cls.clone()
+        loss_center = loss_cls.clone()
         positives = loss_cls.new_zeros(())
         nodes_by_image = [[] for _ in targets]
         prepared_targets = prepare_target_batch(
@@ -81,7 +87,12 @@ class FCOS3DLoss(nn.Module):
                 positive = labels >= 0
                 positives = positives + positive.sum()
                 image_cls_logits = cls_logits[image_index]
-                raw = prediction["bbox"][image_index].permute(1, 2, 0).reshape(-1, 9)[positive]
+                bbox_channels = prediction["bbox"].shape[1]
+                raw = (
+                    prediction["bbox"][image_index]
+                    .permute(1, 2, 0)
+                    .reshape(-1, bbox_channels)[positive]
+                )
                 depth_logits = None
                 if prediction["depth_logits"] is not None:
                     depth_logits = prediction["depth_logits"][image_index].permute(1, 2, 0)
@@ -151,11 +162,26 @@ class FCOS3DLoss(nn.Module):
             decoded = raw.clone()
             decoded[:, 2] = depth
             decoded[:, 3:6] = raw[:, 3:6].exp()
-            code_weight = decoded.new_tensor([1, 1, 1, 1, 1, 1, 1, 0, 0])
+            regression_target = regression_target[:, : decoded.shape[1]]
             box_loss = functional.smooth_l1_loss(
                 decoded, regression_target, beta=1.0/9.0, reduction="none"
             )
-            loss_bbox = loss_bbox + (box_loss * code_weight * center_target[:, None]).sum()
+            box_loss = box_loss * center_target[:, None]
+            loss_offset = loss_offset + box_loss[:, 0:2].sum()
+            loss_depth = loss_depth + box_loss[:, 2].sum()
+            loss_size = loss_size + box_loss[:, 3:6].sum()
+            loss_yaw = loss_yaw + box_loss[:, 6].sum()
+            if depth_logits is not None:
+                depth_centers = head.depth_centers.to(depth_logits)
+                depth_bin_target = (
+                    regression_target[:, 2:3] - depth_centers[None]
+                ).abs().argmin(dim=1)
+                depth_classification = functional.cross_entropy(
+                    depth_logits, depth_bin_target, reduction="none"
+                )
+                loss_depth_cls = loss_depth_cls + (
+                    depth_classification * center_target
+                ).sum()
             direction_logits = torch.cat([chunk["direction_logits"] for chunk in chunks])
             direction_target = torch.cat([chunk["direction_target"] for chunk in chunks])
             loss_dir = loss_dir + functional.cross_entropy(
@@ -175,7 +201,11 @@ class FCOS3DLoss(nn.Module):
         normalizer = normalizer.clamp_min(1)
         losses = {
             "loss_cls": loss_cls / normalizer,
-            "loss_bbox": loss_bbox / normalizer,
+            "loss_offset": loss_offset / normalizer,
+            "loss_depth": loss_depth / normalizer,
+            "loss_size": loss_size / normalizer,
+            "loss_yaw": loss_yaw / normalizer,
+            "loss_depth_cls": loss_depth_cls / normalizer,
             "loss_direction": loss_dir / normalizer,
             "loss_centerness": loss_center / normalizer,
         }

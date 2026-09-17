@@ -11,9 +11,12 @@
 
 ## 模型
 
-第一阶段网络实现 HAT 配置的结构约束：无 SE、ReLU 的 EfficientNet-B0、三层
-BiFPN 和五尺度 FCOS3D Head。Head 输出分类、中心偏移、直接深度、尺寸、旋转、
-速度、方向、属性、centerness，以及可选的概率深度 logits。
+默认网络采用无 SE、ReLU 的 EfficientNet-B0、三层轻量 BiFPN 和五尺度
+FCOS3D Head。EfficientNet 保留 3×3/5×5 深度卷积以及线性残差输出；BiFPN 使用
+双向求和融合和深度可分离卷积。Head 跨尺度共享卷积权重、为每个尺度保留独立
+归一化，并把中心偏移、深度、尺寸和旋转拆分到独立回归分支。数据集没有可靠的
+速度监督，因此普通模型不再预测速度；后处理为统一9维评估接口补零速度。Head 还输出
+分类、方向、属性、centerness，以及可选的概率深度和几何深度融合权重。
 
 模型代码按组件职责组织，避免后续加入新骨干或检测器时继续堆积在同一目录：
 
@@ -37,7 +40,9 @@ models/
 
 训练、验证、推理和导出只依赖 `project_detection.models.build_model`；组件内部通过
 各子包的 `__init__.py` 暴露稳定接口。完整检测器仍以 `backbone`、`neck`、`head`
-作为成员名，因此本次目录调整不改变 checkpoint 的参数键。
+作为成员名。默认 EfficientNet、BiFPN 和 Head 在轻量化升级后参数键已经变化，
+升级前普通模型的 checkpoint 不能对升级后的默认模型执行严格加载；专用 Legacy
+模型及其历史 HAT checkpoint 兼容关系不受影响。
 
 `fcos3d_r101_fpn_dcn.yaml` 提供另一条不影响现有默认配置的模型路径：Caffe stride
 风格 ResNet-101 输出 C2--C5，FPN 跳过 C2、融合 C3--C5，并从 P5 继续生成 P6、
@@ -59,8 +64,7 @@ w = sigmoid(depth_fuse_logit)
 depth = w * DR + (1 - w) * DP
 ```
 
-概率深度没有额外分类损失；融合结果接受 bbox depth loss。这一点用于复现现有
-0907 实验，未来增强算法必须建立新的配置，不能修改兼容基线。
+概率深度同时接受最近深度 bin 的交叉熵监督，以及融合结果的连续深度回归监督。
 
 完整 PGD 使用独立的 `fcos3d_full_pgd.yaml` 配置。在局部深度 `DL` 基础上，先把
 五层 FPN 的同图候选汇总为实例节点，再由 `task/depth_propagation.py` 根据去畸变

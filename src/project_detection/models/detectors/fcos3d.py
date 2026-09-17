@@ -3,7 +3,7 @@ from __future__ import annotations
 from torch import nn
 
 from ..backbones import (
-    EfficientNetB0HatCompatible,
+    EfficientNetB0,
     LegacyHatEfficientNetB0,
     ResNet101FCOS3D,
 )
@@ -15,7 +15,7 @@ class FCOS3D(nn.Module):
     def __init__(
         self,
         num_classes,
-        backbone="efficientnet_b0_hat_compatible",
+        backbone="efficientnet_b0",
         neck="bifpn",
         neck_channels=64,
         bifpn_stacks=3,
@@ -34,8 +34,8 @@ class FCOS3D(nn.Module):
         deform_groups=1,
     ):
         super().__init__()
-        if backbone == "efficientnet_b0_hat_compatible":
-            self.backbone = EfficientNetB0HatCompatible()
+        if backbone == "efficientnet_b0":
+            self.backbone = EfficientNetB0()
         elif backbone == "legacy_hat_efficientnet_b0":
             self.backbone = LegacyHatEfficientNetB0()
         elif backbone == "resnet101_fcos3d":

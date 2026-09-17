@@ -36,11 +36,11 @@ class NonFiniteTrainingError(RuntimeError):
 class DetectionTrainingStep(torch.nn.Module):
     """Keep detector forward and parameter-dependent loss inside DDP forward.
 
-    The probabilistic-depth loss uses ``head.depth_fuse_logit`` while decoding
-    candidates.  Calling that head method after ``DDP(detector)(images)`` makes
-    the parameter appear unused to DDP and then introduces it into autograd
-    outside the wrapped forward.  Wrapping this complete training step gives
-    DDP one accurate graph boundary without changing the detector state dict.
+    Probabilistic-depth supervision uses head outputs and
+    ``head.depth_fuse_logit`` while decoding candidates. Calling the head after
+    ``DDP(detector)(images)`` would introduce parameter-dependent autograd work
+    outside the wrapped forward. Wrapping the complete training step gives DDP
+    one accurate graph boundary without changing the detector state dict.
     """
 
     def __init__(self, detector, criterion):

@@ -102,7 +102,12 @@ class FCOS3DPostProcessor:
                 height, width = cls.shape[-2:]
                 class_ids = flat_indices // (height * width)
                 locations = flat_indices % (height * width)
-                raw = prediction["bbox"][image_index].permute(1, 2, 0).reshape(-1, 9)[locations]
+                bbox_channels = prediction["bbox"].shape[1]
+                raw = (
+                    prediction["bbox"][image_index]
+                    .permute(1, 2, 0)
+                    .reshape(-1, bbox_channels)[locations]
+                )
                 probability = None
                 if prediction["depth_logits"] is not None:
                     probability = prediction["depth_logits"][image_index].permute(1, 2, 0).reshape(-1, prediction["depth_logits"].shape[1])[locations]
@@ -179,7 +184,14 @@ class FCOS3DPostProcessor:
             normalized_x, normalized_y = undistort_points(centers2d, k, coefficients)
             x = normalized_x * z; y = normalized_y * z
             dims = raw[:, 3:6].exp(); yaw = raw[:, 6]
-            boxes3d = torch.cat([x[:,None], y[:,None], z[:,None], dims, yaw[:,None], raw[:,7:9]], 1)
+            velocity = raw.new_zeros((raw.shape[0], 2))
+            boxes3d = torch.cat(
+                [
+                    x[:, None], y[:, None], z[:, None], dims,
+                    yaw[:, None], velocity,
+                ],
+                1,
+            )
             half_w = (k[0, 0] * dims[:, 2] / z.clamp_min(1e-3)) / 2
             half_h = (k[1, 1] * dims[:, 1] / z.clamp_min(1e-3)) / 2
             image_boxes = torch.stack([centers2d[:,0]-half_w, centers2d[:,1]-half_h,
