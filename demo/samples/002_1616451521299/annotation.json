@@ -1,0 +1,68 @@
+[
+  {
+    "id": 0,
+    "uuid": "once-cam01-0",
+    "label": "car",
+    "car": "car",
+    "visibility": 1,
+    "center": {
+      "x": -4.173467867121303,
+      "y": -15.496260470052725,
+      "z": -0.8894927227743619
+    },
+    "size": {
+      "x": 4.284507751464844,
+      "y": 1.9486768245697021,
+      "z": 1.708540678024292
+    },
+    "rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 4.713263010970795
+    },
+    "source": {
+      "pinhole_left": 1,
+      "pinhole_right": 0,
+      "fisheye_front": 0,
+      "fisheye_right": 0,
+      "fisheye_left": 0,
+      "fisheye_rear_right": 0,
+      "fisheye_rear_left": 0,
+      "once_cam": "cam01",
+      "once_name": "Car"
+    }
+  },
+  {
+    "id": 4,
+    "uuid": "once-cam01-4",
+    "label": "car",
+    "car": "car",
+    "visibility": 1,
+    "center": {
+      "x": -0.69378662109375,
+      "y": -71.35562133789062,
+      "z": -1.527156949043274
+    },
+    "size": {
+      "x": 4.538368225097656,
+      "y": 1.8816547393798828,
+      "z": 1.6024929285049438
+    },
+    "rotation": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 4.738992667190278
+    },
+    "source": {
+      "pinhole_left": 1,
+      "pinhole_right": 0,
+      "fisheye_front": 0,
+      "fisheye_right": 0,
+      "fisheye_left": 0,
+      "fisheye_rear_right": 0,
+      "fisheye_rear_left": 0,
+      "once_cam": "cam01",
+      "once_name": "Car"
+    }
+  }
+]

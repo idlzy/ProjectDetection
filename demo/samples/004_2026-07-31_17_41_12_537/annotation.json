@@ -1,0 +1,34 @@
+[
+    {
+        "id": 621,
+        "uuid": "1a8db453-8e09-11f1-b4ed-6b02416c8c5d",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 3.656291822844025,
+            "y": -2.233152967720664,
+            "z": 0.8503504899160385
+        },
+        "size": {
+            "x": 2.079542252151069,
+            "y": 0.8634692513307778,
+            "z": 1.593252108716034
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -0.059058806500741495
+        },
+        "source": {
+            "pinhole_right": 1,
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0",
+            "fisheye_rear_left": 0
+        }
+    }
+]

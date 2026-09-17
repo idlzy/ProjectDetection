@@ -1,0 +1,27 @@
+{
+  "split": "test",
+  "selection_seed": 3407,
+  "sample_token": "mw3d_v5__0807-D201-3D-国外道路-夜晚白天-1550（1014有效）__2026-07-22_19-45-52__2026-07-22_19_45_53_437",
+  "stem": "2026-07-22_19_45_53_437",
+  "ann_batch": "0807-D201-3D-国外道路-夜晚白天-1550（1014有效）",
+  "split_group": "0807-D201-3D-国外道路-夜晚白天-1550（1014有效）__2026-07-22_19-45-52",
+  "source_paths": {
+    "image": "images/722行车数据源_D201_国内_道路_夜晚_1550帧/2026-07-22_19-45-52/camera/AIU_Camera_FrontLeft/2026-07-22_19_45_53_437.jpg",
+    "annotation": "annotation/0807-D201-3D-国外道路-夜晚白天-1550（1014有效）/2026-07-22_19-45-52/json/2026-07-22_19_45_53_437.json",
+    "intrinsic": "images/722行车数据源_D201_国内_道路_夜晚_1550帧/2026-07-22_19-45-52/sensor_params/FrontViewCalibParam.json",
+    "extrinsic": "images/722行车数据源_D201_国内_道路_夜晚_1550帧/2026-07-22_19-45-52/camera_extrinsic/camera_front_left/2026-07-22_19_45_53_437.txt"
+  },
+  "demo_paths": {
+    "image": "samples/005_2026-07-22_19_45_53_437/image.jpg",
+    "annotation": "samples/005_2026-07-22_19_45_53_437/annotation.json",
+    "intrinsic": "samples/005_2026-07-22_19_45_53_437/FrontViewCalibParam.json",
+    "extrinsic": "samples/005_2026-07-22_19_45_53_437/extrinsic.txt"
+  },
+  "sha256": {
+    "image": "8a7ac6eba9f6917d9b2e96d6e129f73bdf2eca042e5775aa3b4efb59801f6b8c",
+    "annotation": "d25fdb4a43de6ec465753cfae7058ad719df8678da5c9fc5a080c5397400381c",
+    "intrinsic": "38bd4dd9570e91f7ec41b9936ca8d49608c601ba78432dced45f16afdf6fad89",
+    "extrinsic": "19107a9e868801f6dcba29928e0fb0facc45bffbaa68bb8d70c0ba270da1c471"
+  },
+  "source_data_root": "/home/gy-zb-a-luziyang/datasets/mw3d_0915"
+}

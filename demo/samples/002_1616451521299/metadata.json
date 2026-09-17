@@ -1,0 +1,27 @@
+{
+  "split": "test",
+  "selection_seed": 3407,
+  "sample_token": "once__ONCE_cam01__000104__1616451521299",
+  "stem": "1616451521299",
+  "ann_batch": null,
+  "split_group": "ONCE_cam01__000104",
+  "source_paths": {
+    "image": "images/ONCE_cam01/000104/camera/AIU_Camera_FrontLeft/1616451521299.jpg",
+    "annotation": "annotation/ONCE_cam01/000104/json/1616451521299.json",
+    "intrinsic": "images/ONCE_cam01/000104/513参数/FrontViewCalibParam.json",
+    "extrinsic": "images/ONCE_cam01/000104/camera_extrinsic/front_left.txt"
+  },
+  "demo_paths": {
+    "image": "samples/002_1616451521299/image.jpg",
+    "annotation": "samples/002_1616451521299/annotation.json",
+    "intrinsic": "samples/002_1616451521299/FrontViewCalibParam.json",
+    "extrinsic": "samples/002_1616451521299/extrinsic.txt"
+  },
+  "sha256": {
+    "image": "9b64720716adff36d1dda4c081158844649ac07244c4339a3baf813fa8fdb188",
+    "annotation": "0736b79440fa3ef4d3f620e0addf592ad004d8965b337a3f3878273c2ea05e92",
+    "intrinsic": "ffff6c4dd33ccd151b0ee6ed7de972e28fa87ffd2e4aa0885f10383bd9126013",
+    "extrinsic": "3907b1c2a531be2420ac6c9136c9dce2781ea77754049de6ffe3d8d500082bad"
+  },
+  "source_data_root": "/home/gy-zb-a-luziyang/datasets/mw3d_0915"
+}

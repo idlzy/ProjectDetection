@@ -1,0 +1,2751 @@
+[
+    {
+        "id": 345,
+        "uuid": "63d59ff1-8996-11f1-b651-bd6c33ebd5f1",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": -18.66462976140014,
+            "y": -3.4116052938779315,
+            "z": 0.8434135191527887
+        },
+        "size": {
+            "x": 4.2150604224203265,
+            "y": 1.6880203310670905,
+            "z": 1.6050011262518282
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.0671562942647626
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 346,
+        "uuid": "4f07c6ab-8998-11f1-8162-65afa2ce2bb1",
+        "relatedtootherobjects": "no",
+        "car": "suv",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": -17.955846679783324,
+            "y": -10.443525737939181,
+            "z": 0.963055750006153
+        },
+        "size": {
+            "x": 4.3646524953135355,
+            "y": 1.8831604558251582,
+            "z": 1.826810551917275
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -3.0916111137178737
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 347,
+        "uuid": "ba663cc2-8999-11f1-bf52-a715d2a8523a",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -3.272211560803335,
+            "y": -4.066611413886977,
+            "z": 0.615140332947929
+        },
+        "size": {
+            "x": 0.20254262798170797,
+            "y": 0.16922231191721462,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10961269247068511
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 348,
+        "uuid": "81d14e02-899b-11f1-bf52-6bbb2a112dd8",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -4.513806636186083,
+            "y": -4.310513818884399,
+            "z": 0.4547304464072247
+        },
+        "size": {
+            "x": 0.21004231729553097,
+            "y": 0.2029097149675972,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.053634787244690986
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 349,
+        "uuid": "e2149876-899c-11f1-a970-13d4a22abb4f",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": -25.18723535803426,
+            "y": -2.9316399741309045,
+            "z": 0.8614488865937632
+        },
+        "size": {
+            "x": 1.8506403122424637,
+            "y": 0.7701290140355581,
+            "z": 1.6820561637316365
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06679028737440566
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 350,
+        "uuid": "537cb9e2-8a22-11f1-b13c-93274677d299",
+        "relatedtootherobjects": "no",
+        "Pedestrian": "adult",
+        "label": "Pedestrian",
+        "visibility": 1,
+        "center": {
+            "x": -28.159157347324076,
+            "y": -1.8935663280244142,
+            "z": 0.8080131285478411
+        },
+        "size": {
+            "x": 0.6681785494370462,
+            "y": 0.6405506100188354,
+            "z": 1.572290955645377
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -3.04347190853997
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 351,
+        "uuid": "5cafced4-8a23-11f1-8b2e-918717b20ef7",
+        "relatedtootherobjects": "no",
+        "Pedestrian": "adult",
+        "label": "Pedestrian",
+        "visibility": 1,
+        "center": {
+            "x": -32.94217731876322,
+            "y": -2.603911422316969,
+            "z": 0.7554064062798427
+        },
+        "size": {
+            "x": 0.8295512344198276,
+            "y": 0.7485590062850008,
+            "z": 1.6234725999600137
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10595555726839076
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 352,
+        "uuid": "d24b1ea5-8a24-11f1-b6ee-131a445005e1",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": -29.217784418966716,
+            "y": -3.7464189438013333,
+            "z": 0.7200234434874193
+        },
+        "size": {
+            "x": 1.8954162904458458,
+            "y": 0.7002384451897845,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.08245231646976545
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 353,
+        "uuid": "5b286487-8a26-11f1-a7b6-cd13cbbd8f09",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -15.408679029970557,
+            "y": -8.622828033523549,
+            "z": 0.47115792525581185
+        },
+        "size": {
+            "x": 0.19738396804194253,
+            "y": 0.23529045042996158,
+            "z": 0.6868711682479085
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07171118788996124
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 354,
+        "uuid": "693f0050-8a27-11f1-ba87-ad06ff7bec43",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -17.025599128368167,
+            "y": -8.848593053376774,
+            "z": 0.42286685910555505
+        },
+        "size": {
+            "x": 0.19738396804194253,
+            "y": 0.23529045042996158,
+            "z": 0.7195464359226658
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07171034697533192
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 355,
+        "uuid": "90fe0f99-8a28-11f1-bacf-459ee46da18d",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -6.497341064578577,
+            "y": -0.13901109231747635,
+            "z": 0.6746313399757087
+        },
+        "size": {
+            "x": 0.19389086279905504,
+            "y": 0.1546874592361606,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.1096112581372431
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 356,
+        "uuid": "955262f7-8a2a-11f1-b6ee-812673b4b5db",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -8.143097848702979,
+            "y": -0.05494503071688718,
+            "z": 0.6684433735474323
+        },
+        "size": {
+            "x": 0.19389086279905504,
+            "y": 0.1546874592361606,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10960982382612369
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 357,
+        "uuid": "b5b6e6aa-8a2d-11f1-b13c-93bb9e50f82f",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -16.232969805106972,
+            "y": -0.6761666446163549,
+            "z": 0.6463795955426502
+        },
+        "size": {
+            "x": 0.19389086279905504,
+            "y": 0.1546874592361606,
+            "z": 1.0768347107828413
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10960838953732668
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 358,
+        "uuid": "001b6f9d-8a2f-11f1-b404-81d34cf8ae35",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -18.308274360554815,
+            "y": -0.8651761610401553,
+            "z": 0.6089473994160135
+        },
+        "size": {
+            "x": 0.19389086279905504,
+            "y": 0.1546874592361606,
+            "z": 1.0768347107828413
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10960782141667483
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 413,
+        "uuid": "b708a531-8a36-11f1-b13c-358287b57bee",
+        "relatedtootherobjects": "no",
+        "Pedestrian": "adult",
+        "label": "Pedestrian",
+        "visibility": 1,
+        "center": {
+            "x": -34.18991262875275,
+            "y": -2.6477153086718888,
+            "z": 0.8369199634980093
+        },
+        "size": {
+            "x": 0.571021611813171,
+            "y": 0.5845800310442648,
+            "z": 1.6787564766839311
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.04991143957131237
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 359,
+        "uuid": "10234fc0-8a37-11f1-8b2e-2bccc89ae026",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 2.927834702134757,
+            "y": -0.5477979480063038,
+            "z": 0.5776282608639468
+        },
+        "size": {
+            "x": 0.20254262798170797,
+            "y": 0.19176783163371647,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07056891387213268
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 360,
+        "uuid": "5192572e-8a39-11f1-8997-f5b34807a15e",
+        "relatedtootherobjects": "no",
+        "car": "mpv",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 6.381200405610409,
+            "y": -4.914940809671604,
+            "z": 0.8705846536005327
+        },
+        "size": {
+            "x": 4.398401363587913,
+            "y": 1.765524400515168,
+            "z": 1.9257351500022024
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -3.0863309138071564
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 361,
+        "uuid": "d275feb6-8a49-11f1-bacf-835efe1d4632",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 3.1121187236726136,
+            "y": 0.04978137306365871,
+            "z": 1.4464356543788361
+        },
+        "size": {
+            "x": 0.15661782959220233,
+            "y": 1.7900602458166295,
+            "z": 1.1765898503361605
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.11226075788753799
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 362,
+        "uuid": "e16d3761-8a4a-11f1-a7b6-1fe1894eb81d",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 2.745879938790157,
+            "y": 1.0363581818196814,
+            "z": 0.5661792865466938
+        },
+        "size": {
+            "x": 0.32256474866851803,
+            "y": 0.3916286668451737,
+            "z": 1.145382167391654
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.09812074505166468
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 363,
+        "uuid": "2eeae736-8a4c-11f1-8b2e-eb501d146354",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 3.7184349545559896,
+            "y": -2.128515792824558,
+            "z": 0.9048043272964031
+        },
+        "size": {
+            "x": 0.12303951239013697,
+            "y": 3.203044283238201,
+            "z": 0.40882164382662567
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07053295980161228
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 364,
+        "uuid": "f9cbe52a-8a4d-11f1-bacf-755a625e74e7",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 3.596664844716139,
+            "y": -3.761215556596375,
+            "z": 0.5387377163459389
+        },
+        "size": {
+            "x": 0.35048302620081406,
+            "y": 0.35718018009959984,
+            "z": 1.1485295723975335
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06818580947081947
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 365,
+        "uuid": "ae47daba-8a4f-11f1-ba87-d58e392935f7",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 1.2896294008876947,
+            "y": -0.6321253761123572,
+            "z": 0.5824612205606773
+        },
+        "size": {
+            "x": 0.20254262798170797,
+            "y": 0.19176783163371647,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07056809093409923
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 366,
+        "uuid": "32334212-8a51-11f1-b6ee-a3400e1a9e1c",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -0.13058249206278494,
+            "y": -0.6540075864183801,
+            "z": 0.6159536407768158
+        },
+        "size": {
+            "x": 0.20254262798170797,
+            "y": 0.19176783163371647,
+            "z": 1.1348342656439125
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07056726800901827
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 367,
+        "uuid": "0969b5ea-8a52-11f1-a7b6-3948d8a9c2ad",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 5.939053239778881,
+            "y": 1.2732639573877464,
+            "z": 0.3352963395262346
+        },
+        "size": {
+            "x": 0.2279348109910765,
+            "y": 0.21674446826083943,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06488258649080951
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 368,
+        "uuid": "c6678eb1-8a53-11f1-842b-0740d35ba68a",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 7.511578130332216,
+            "y": 1.5030965590554135,
+            "z": 0.21950292629575643
+        },
+        "size": {
+            "x": 0.2279348109910765,
+            "y": 0.22905949486656896,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06488185310369962
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 369,
+        "uuid": "5b09380c-8a55-11f1-bacf-fbdc4f1a8cd3",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 9.449792345008518,
+            "y": 1.616818233857501,
+            "z": 0.09405021278822828
+        },
+        "size": {
+            "x": 0.2279348109910765,
+            "y": 0.2463907930542304,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06488111972814589
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 370,
+        "uuid": "fb1e66fe-8a56-11f1-8b2e-391105e434e2",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 10.727010035433725,
+            "y": 1.6668687879493886,
+            "z": 0.0334475524395475
+        },
+        "size": {
+            "x": 0.23225175816893723,
+            "y": 0.24163396746233154,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06488111972814589
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 371,
+        "uuid": "c3f42b75-8a58-11f1-8b2e-dbbc728bb37f",
+        "Obstacle": "Cone_barrel",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 15.378652864258067,
+            "y": 1.8719048347243683,
+            "z": -0.13461764061663176
+        },
+        "size": {
+            "x": 0.23528754682949413,
+            "y": 0.2463907930542304,
+            "z": 0.7347626724406866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06488038636414804
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 372,
+        "uuid": "ebbdc20a-8a59-11f1-a7b6-1d9e0dbb9685",
+        "relatedtootherobjects": "no",
+        "Pedestrian": "adult",
+        "label": "Pedestrian",
+        "visibility": 1,
+        "center": {
+            "x": 12.407502567782535,
+            "y": -3.0996917480396458,
+            "z": 0.37662702144778737
+        },
+        "size": {
+            "x": 0.9117611654373787,
+            "y": 0.698304523438788,
+            "z": 1.6790711294186975
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.8774116913257064
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 373,
+        "uuid": "b9a19f83-8a5b-11f1-ba75-47a39341b46a",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 12.76928021956188,
+            "y": 1.0389948278349843,
+            "z": 0.3692339945785078
+        },
+        "size": {
+            "x": 1.8825870073436675,
+            "y": 0.8114574250133948,
+            "z": 1.5549418434657498
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.022251830929515208
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 374,
+        "uuid": "ec5d4e06-8a5f-11f1-b13c-0721d5ee9831",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 14.4798911679365,
+            "y": 0.38528232701228327,
+            "z": 0.28423546875923494
+        },
+        "size": {
+            "x": 2.0377086578796053,
+            "y": 0.6489117728019388,
+            "z": 1.638461538461546
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.1400918824573951
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 414,
+        "uuid": "aab6d500-8a63-11f1-bacf-d7bbea22f867",
+        "relatedtootherobjects": "no",
+        "Pedestrian": "adult",
+        "label": "Pedestrian",
+        "visibility": 1,
+        "center": {
+            "x": 10.284265379818688,
+            "y": -6.151613113186263,
+            "z": 0.5794327540396598
+        },
+        "size": {
+            "x": 0.7001629222192811,
+            "y": 0.831379089838883,
+            "z": 1.8619062214120354
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5832814932431003
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 415,
+        "uuid": "bf422651-8af5-11f1-a557-77daf59fe9a5",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.997982081414097,
+            "y": -8.320133689979219,
+            "z": 0.12537517879316623
+        },
+        "size": {
+            "x": 2.0105386184038436,
+            "y": 0.7666362778820388,
+            "z": 1.6691234126519654
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.594578472107216
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 375,
+        "uuid": "5942057d-8af7-11f1-b807-6f038bea6ad4",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.51210539935687,
+            "y": -6.110485837166992,
+            "z": 0.15151382337518407
+        },
+        "size": {
+            "x": 1.9564884131751614,
+            "y": 0.7865822713471996,
+            "z": 1.6522857433910136
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.8055554361803168
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 416,
+        "uuid": "c42a127f-8af8-11f1-89f4-819675c42c84",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 19.730987087997793,
+            "y": -10.845522050592738,
+            "z": -0.03274137269070114
+        },
+        "size": {
+            "x": 4.041039571633998,
+            "y": 1.6878178893871898,
+            "z": 1.7382762159212337
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6077888534146325
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 376,
+        "uuid": "f8f1b3fc-8afb-11f1-aec9-b943a4656027",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.21475078446811,
+            "y": -1.723423356369659,
+            "z": 0.25014086762383014
+        },
+        "size": {
+            "x": 1.9451331248428751,
+            "y": 0.7312787373915447,
+            "z": 1.7197075651620857
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6662168007486462
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 377,
+        "uuid": "a50baa15-8afd-11f1-aa48-41208690380a",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.952033220964918,
+            "y": -8.607739520639976,
+            "z": 0.18384747295572426
+        },
+        "size": {
+            "x": 2.1033080165514537,
+            "y": 0.8105340313288223,
+            "z": 1.7427173227785766
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5818144923402746
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 378,
+        "uuid": "bb247192-8afe-11f1-adc5-af68e5eb8ad9",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 19.636310106894406,
+            "y": -6.0133103087923985,
+            "z": 0.2150181120299175
+        },
+        "size": {
+            "x": 4.035727069418786,
+            "y": 1.7376950806545355,
+            "z": 1.645921599276083
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5978515578333414
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 379,
+        "uuid": "ec222403-8aff-11f1-a557-c105b6a0cb6a",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.07655992246224,
+            "y": 1.9156768958226158,
+            "z": 0.29196686736213046
+        },
+        "size": {
+            "x": 1.9727562044810871,
+            "y": 0.7601886074044033,
+            "z": 1.7025042677935431
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.2305784555161852
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 380,
+        "uuid": "8119943b-8b14-11f1-aec9-6939aa6a4978",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.848326908321706,
+            "y": -0.2054334174723006,
+            "z": 0.23640756856818282
+        },
+        "size": {
+            "x": 1.778445881579728,
+            "y": 0.7091281958905304,
+            "z": 1.609233698238913
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6336090976579667
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 381,
+        "uuid": "c36f0404-8b16-11f1-80df-8d6d0f4d444c",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.02961990512575,
+            "y": -2.952926457537937,
+            "z": 0.17732092141889264
+        },
+        "size": {
+            "x": 1.858835025944868,
+            "y": 0.6052846054970303,
+            "z": 1.5857310119142076
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.2356797872456309
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 417,
+        "uuid": "8db8395b-8b19-11f1-adc5-bf04f2bf614c",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 21.93185660843133,
+            "y": -6.3078255285005955,
+            "z": 0.41791069208383724
+        },
+        "size": {
+            "x": 4.549131042802287,
+            "y": 1.7314782132339563,
+            "z": 1.586321584369238
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6069084579835096
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 382,
+        "uuid": "d6af5071-8b1a-11f1-aa48-0d70c6fee679",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 22.385666493228953,
+            "y": -0.1830348389891893,
+            "z": 0.4207824512274616
+        },
+        "size": {
+            "x": 4.43680966276783,
+            "y": 1.8301218902716694,
+            "z": 1.7438300560498776
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5433514292309314
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 383,
+        "uuid": "15b0cf65-8b1c-11f1-aa48-49516ea1f376",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.24986292603437,
+            "y": -2.352949434889083,
+            "z": 0.22616775260730826
+        },
+        "size": {
+            "x": 1.7859824861800657,
+            "y": 0.6430085404509689,
+            "z": 1.6175918869112844
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.506935976481467
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 384,
+        "uuid": "c31f3299-8b1d-11f1-bfd0-b5730ea1de61",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.126384985081916,
+            "y": -4.223073032559938,
+            "z": 0.2562953664004556
+        },
+        "size": {
+            "x": 1.7663810701876166,
+            "y": 0.701044003024391,
+            "z": 1.6375000000000057
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.9340858775155598
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 418,
+        "uuid": "2abfc09e-8b20-11f1-bbcf-83f9c9660ff6",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 23.373776122803417,
+            "y": -6.129432999548723,
+            "z": 0.2519874104841312
+        },
+        "size": {
+            "x": 2.1239922880243167,
+            "y": 0.7226382480339619,
+            "z": 1.595238095238099
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6022478453192923
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 419,
+        "uuid": "900def92-8b21-11f1-adc5-7fcc947b5476",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 24.512776847851637,
+            "y": -3.0249985365479235,
+            "z": 0.3662494567733244
+        },
+        "size": {
+            "x": 4.048276442075052,
+            "y": 1.6760761296189002,
+            "z": 1.6000000000000496
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.605968317421263
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 385,
+        "uuid": "a2b8e11e-8b22-11f1-aa48-4ffc6ff8823f",
+        "relatedtootherobjects": "no",
+        "car": "car",
+        "label": "car",
+        "visibility": 1,
+        "center": {
+            "x": 24.725935498998318,
+            "y": 4.971565128621787,
+            "z": 0.666105802616764
+        },
+        "size": {
+            "x": 4.109738707582125,
+            "y": 1.7046571571286915,
+            "z": 1.770967741935384
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5620200474735302
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 386,
+        "uuid": "004e53fb-8b25-11f1-adc5-2d2319ccb328",
+        "bus": "Largebuses",
+        "relatedtootherobjects": "no",
+        "label": "bus",
+        "visibility": 1,
+        "center": {
+            "x": 28.171736378454415,
+            "y": 8.905272908716247,
+            "z": 1.4086339357777637
+        },
+        "size": {
+            "x": 13.208818124997524,
+            "y": 2.8979228100634966,
+            "z": 3.755036820772866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5656751549892476
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "1",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 388,
+        "uuid": "4f228eaa-8bcc-11f1-86e5-030ccef91682",
+        "bus": "Largebuses",
+        "relatedtootherobjects": "no",
+        "label": "bus",
+        "visibility": 1,
+        "center": {
+            "x": 42.365446789927844,
+            "y": -23.61551783434081,
+            "z": 1.2527498763110354
+        },
+        "size": {
+            "x": 11.834489117340727,
+            "y": 2.941893626123303,
+            "z": 3.755036820772866
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6326104343847396
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "1",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 420,
+        "uuid": "0595373b-8be6-11f1-906e-97b6adefbc45",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 26.844410487796967,
+            "y": -11.124685349507674,
+            "z": 0.5457192240192565
+        },
+        "size": {
+            "x": 1.8039439543287104,
+            "y": 0.7488174807116886,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.554521740842955
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 408,
+        "uuid": "16100236-8be7-11f1-bfd0-a53403a78d1e",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 27.92843747379832,
+            "y": -7.692357633354216,
+            "z": 0.5008481991632896
+        },
+        "size": {
+            "x": 1.8623364975437084,
+            "y": 0.7921880086129001,
+            "z": 1.6331766979053044
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5215923257303006
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 389,
+        "uuid": "53feb13e-8be8-11f1-b807-4528059553d5",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 26.653018066334305,
+            "y": -6.855720534151243,
+            "z": 0.6704981541206195
+        },
+        "size": {
+            "x": 2.0634937965206093,
+            "y": 0.8096102848463247,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.566052624539321
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 407,
+        "uuid": "2048ab14-8be9-11f1-adc5-9ded3647c9fa",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 27.750776682794577,
+            "y": -5.53764216147308,
+            "z": 0.6007272396473271
+        },
+        "size": {
+            "x": 1.8422472069511384,
+            "y": 0.7069372648374984,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5587804756742567
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 421,
+        "uuid": "16fa5a6e-8bea-11f1-aec9-118d7c3a2ba1",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 29.068521236107568,
+            "y": -8.833892387226152,
+            "z": 0.5824880129355755
+        },
+        "size": {
+            "x": 1.8805209962836016,
+            "y": 0.8336175471283636,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.527906522135266
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 409,
+        "uuid": "d3073946-8bea-11f1-b391-43f73ffb2702",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 28.99498617558768,
+            "y": -6.772090934380223,
+            "z": 0.5062310982430673
+        },
+        "size": {
+            "x": 1.8529301478557523,
+            "y": 0.6858431816777893,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5261440567944438
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 422,
+        "uuid": "8e4e935e-8bed-11f1-89f4-eddb9437e167",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 25.462111949905495,
+            "y": -13.261898294264016,
+            "z": 0.305481202345781
+        },
+        "size": {
+            "x": 1.7932838152297967,
+            "y": 0.7230900315072414,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5865207312241127
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 423,
+        "uuid": "1fb4406f-8bee-11f1-bbcf-0963d5cd7ea7",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 26.72197046031872,
+            "y": -2.3273624045126415,
+            "z": 0.5157107959137807
+        },
+        "size": {
+            "x": 1.8763336594812023,
+            "y": 0.7585511814286789,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6276211508846992
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 410,
+        "uuid": "b11de651-8bee-11f1-bbcf-0b5c9692ae28",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 28.183168870976424,
+            "y": -3.641232520441067,
+            "z": 0.589058723414451
+        },
+        "size": {
+            "x": 1.8198613217346296,
+            "y": 0.6993907446541554,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.621833475050877
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 411,
+        "uuid": "95adb665-8bef-11f1-80df-1537612435bd",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 26.80613192412313,
+            "y": -4.672920321563792,
+            "z": 0.5655122551435153
+        },
+        "size": {
+            "x": 1.921132993246949,
+            "y": 0.7326115352061212,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.590041604556861
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 412,
+        "uuid": "f8f3a6f7-8bf2-11f1-906e-9101ea56011c",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 25.38651129213702,
+            "y": -6.821464829987583,
+            "z": 0.5084523942481424
+        },
+        "size": {
+            "x": 1.7978428451809982,
+            "y": 0.7016277496017856,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5574126509410238
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 390,
+        "uuid": "1a13b281-8bf6-11f1-906e-23a64c1a3e35",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 23.33820322198861,
+            "y": -10.231373455370655,
+            "z": 0.33798742028021855
+        },
+        "size": {
+            "x": 1.8376691475714653,
+            "y": 0.6905181391168931,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5901573295212503
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 424,
+        "uuid": "8ce1628e-8bf7-11f1-89f4-23a78bce2592",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 22.141615922016193,
+            "y": -11.57856632527313,
+            "z": 0.23473395145313258
+        },
+        "size": {
+            "x": 1.893300846285564,
+            "y": 0.7103940183457398,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5738070890590659
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 425,
+        "uuid": "a097cfe7-8bf8-11f1-89f4-69a9c0209f77",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 21.18211203922055,
+            "y": -11.61815837934395,
+            "z": 0.28553788132269675
+        },
+        "size": {
+            "x": 1.9527012476938834,
+            "y": 0.7889702654815238,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5942254701168737
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 391,
+        "uuid": "d985faf9-8bf9-11f1-906e-614884900940",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.790021131051507,
+            "y": -0.48508409910653494,
+            "z": 0.3102332762015432
+        },
+        "size": {
+            "x": 1.756269116080472,
+            "y": 0.7040768325032052,
+            "z": 1.6384615384615249
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5644891141333082
+        },
+        "source": {
+            "pinhole_left": "1",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 426,
+        "uuid": "5da7d129-8bfa-11f1-80df-794f007267c6",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.56456401056358,
+            "y": -0.5107374435437038,
+            "z": 0.34031596306414064
+        },
+        "size": {
+            "x": 1.8017871512044723,
+            "y": 0.7969611471430051,
+            "z": 1.6375623616393709
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5714427518010443
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 427,
+        "uuid": "697c6ccf-8bfb-11f1-86e5-31b24b4670de",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 24.464444593824126,
+            "y": -12.015135326404339,
+            "z": 0.2812500000000011
+        },
+        "size": {
+            "x": 1.8866542744135852,
+            "y": 0.6841736941864869,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5942992332325239
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 392,
+        "uuid": "a97dec35-8bfb-11f1-bfd0-f70ea9d87cc7",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.964796312343907,
+            "y": 1.2182653864415898,
+            "z": 0.2264242997602307
+        },
+        "size": {
+            "x": 1.6314199847442734,
+            "y": 0.6391442264744421,
+            "z": 1.654411764705845
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5969656916664186
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 428,
+        "uuid": "183398f5-8bfc-11f1-bbcf-69726b1d1237",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.9803729909353,
+            "y": 1.6358403399381667,
+            "z": 0.3719479409470241
+        },
+        "size": {
+            "x": 1.7741968039618499,
+            "y": 0.7595251375755699,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6642738727406328
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 429,
+        "uuid": "88ed7a59-8bfc-11f1-adc5-a3ddaec23d0d",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 19.99698324260852,
+            "y": 2.8720955461953075,
+            "z": 0.373139413413913
+        },
+        "size": {
+            "x": 1.8207939293282582,
+            "y": 0.707040704269974,
+            "z": 1.5881458966565394
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6413068898463523
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 430,
+        "uuid": "f0504de5-8bfc-11f1-b391-4d7ca6687e42",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.103000222750065,
+            "y": 3.3823241740041134,
+            "z": 0.2819300478923417
+        },
+        "size": {
+            "x": 1.7386394390387911,
+            "y": 0.7354516389071191,
+            "z": 1.5365853658536577
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6513958607601453
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 431,
+        "uuid": "3dc1be7a-8bfd-11f1-89f4-69b0b89741cb",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.921131630970518,
+            "y": 3.718382222056985,
+            "z": 0.435675137819322
+        },
+        "size": {
+            "x": 1.9860362331650057,
+            "y": 0.7299107037765111,
+            "z": 1.6618837849052357
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6334714048908023
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 393,
+        "uuid": "9ed323f3-8bfd-11f1-adc5-bb365141457d",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 16.819415452631393,
+            "y": 4.144577874005757,
+            "z": 0.2062031624158951
+        },
+        "size": {
+            "x": 1.871492955111722,
+            "y": 0.6315945805938549,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6300546210507694
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 432,
+        "uuid": "094c37b9-8bfe-11f1-a557-2f97151e392f",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.227975902823818,
+            "y": 1.7419125548327705,
+            "z": 0.21770605517633046
+        },
+        "size": {
+            "x": 1.8272396152780375,
+            "y": 0.6843963551438111,
+            "z": 1.5245885458766608
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5864338318981344
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 433,
+        "uuid": "69e70e3f-8bfe-11f1-aec9-79e36cc2224f",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 17.30680954208315,
+            "y": 6.432731412456947,
+            "z": 0.27713438783257527
+        },
+        "size": {
+            "x": 1.8098987954034436,
+            "y": 0.6934551437717857,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5551279070842245
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 434,
+        "uuid": "8fe61336-8bfe-11f1-a557-b56c5b791a87",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 18.137902092455565,
+            "y": 6.068003421976148,
+            "z": 0.33279326193171116
+        },
+        "size": {
+            "x": 1.997802792167702,
+            "y": 0.8031718533454679,
+            "z": 1.5714285714285607
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.6173629978416497
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 435,
+        "uuid": "c5ca27ee-8bfe-11f1-89f4-611baf236fe9",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 19.06207613847318,
+            "y": 6.637969308215278,
+            "z": 0.35546644239502395
+        },
+        "size": {
+            "x": 1.8146303682448588,
+            "y": 0.6794077925991786,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.624077690081669
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 436,
+        "uuid": "f77638c1-8bfe-11f1-b391-91b87429bd55",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 20.14909795782775,
+            "y": 6.293830072709284,
+            "z": 0.4169406788298736
+        },
+        "size": {
+            "x": 1.4513750683782027,
+            "y": 0.5389597859520426,
+            "z": 1.6486632354175885
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.7898986920611508
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 394,
+        "uuid": "59f5449f-8ca3-11f1-af58-dd7c8b76a599",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": -19.54028380041139,
+            "y": -9.001094998756464,
+            "z": 0.8026960383121884
+        },
+        "size": {
+            "x": 0.4785648304116282,
+            "y": 0.6216481882707348,
+            "z": 1.5139745915390406
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.1059549596168981
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 395,
+        "uuid": "5356d2fa-8ca4-11f1-870f-bb77d51060bf",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": -5.794859189169517,
+            "y": -4.400816960003224,
+            "z": 0.86064211606051
+        },
+        "size": {
+            "x": 0.16108962262847362,
+            "y": 0.5898068613640521,
+            "z": 1.5537628381992805
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.032459945496749215
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 396,
+        "uuid": "f3445521-8ca5-11f1-b0cf-4937c806e7d4",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 4.370923000215942,
+            "y": -6.76838000295334,
+            "z": 0.5182491205324027
+        },
+        "size": {
+            "x": 0.19251278130195093,
+            "y": 0.2019183232675269,
+            "z": 1.1718750000000067
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -0.01199174244725124
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 397,
+        "uuid": "b58ef2f8-8ca6-11f1-b0cf-c354ed9076da",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": -0.380225920910115,
+            "y": -7.045583402867597,
+            "z": 0.6106065613842734
+        },
+        "size": {
+            "x": 0.19674354467368826,
+            "y": 0.19078162729379322,
+            "z": 1.1749841767710674
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06293682164346641
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 398,
+        "uuid": "6ef2f818-8ca7-11f1-8675-99c24ce338a3",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 2.3315163028280583,
+            "y": -6.904386320747003,
+            "z": 0.5369233952127415
+        },
+        "size": {
+            "x": 0.12346578371107436,
+            "y": 0.16247677303847247,
+            "z": 1.0939657470257629
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": -0.012526403883511873
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 399,
+        "uuid": "9049b5f4-8ca8-11f1-b4ed-e986c50e4780",
+        "Obstacle": "Intersection_marker_post",
+        "relatedtootherobjects": "no",
+        "label": "Obstacle",
+        "visibility": 1,
+        "center": {
+            "x": 1.7583019827507147,
+            "y": -6.920171341600278,
+            "z": 0.5252945862469114
+        },
+        "size": {
+            "x": 0.1985448498937507,
+            "y": 0.15991795277554915,
+            "z": 1.1261498854226857
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.011942001158584237
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "1",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 400,
+        "uuid": "aed21091-8ca9-11f1-bcc5-55b50879c72c",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 5.014214136348836,
+            "y": -6.848453507315642,
+            "z": 0.7356284385361841
+        },
+        "size": {
+            "x": 0.1556804517035134,
+            "y": 0.6367650195733464,
+            "z": 1.5211934103338205
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.007754178027502719
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 401,
+        "uuid": "e73f4c58-8caa-11f1-b4ed-7de453c1ed00",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": -0.954149484048319,
+            "y": -5.557049743825859,
+            "z": 2.21851327074385
+        },
+        "size": {
+            "x": 0.1319968522032633,
+            "y": 3.286061982470419,
+            "z": 2.8260712101786134
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.06284781591702499
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 402,
+        "uuid": "d0a3df92-8cac-11f1-a112-0bcb29806437",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": -0.7995268092768953,
+            "y": -3.9421734426972797,
+            "z": 0.6024440078033129
+        },
+        "size": {
+            "x": 0.349036205871772,
+            "y": 0.38866974396551135,
+            "z": 1.1366459627328847
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.10014042123744221
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "1",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "1"
+        }
+    },
+    {
+        "id": 403,
+        "uuid": "19c5fdc3-8cae-11f1-a112-851b8a99b1d9",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 24.115594467066725,
+            "y": -9.630567608709617,
+            "z": 0.38859164473880337
+        },
+        "size": {
+            "x": 1.7325752451035128,
+            "y": 0.640520532324902,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5899214198939062
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 437,
+        "uuid": "46449129-8caf-11f1-88f1-f332f5726d5c",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 21.629057422603438,
+            "y": 4.301637684230183,
+            "z": 0.5409949882741284
+        },
+        "size": {
+            "x": 1.8065252975011483,
+            "y": 0.7495113165845976,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5845471789366679
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 404,
+        "uuid": "b8ab84e7-8cba-11f1-b4ed-a96dbfbfadfc",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 0.7900234979410001,
+            "y": -8.654671000145601,
+            "z": 0.5963210625047937
+        },
+        "size": {
+            "x": 0.44848648292643944,
+            "y": 0.38143086992062886,
+            "z": 1.1479591836734897
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.07905687048870035
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 405,
+        "uuid": "22ea642b-8cbd-11f1-b0cf-c715e055c5f6",
+        "relatedtootherobjects": "no",
+        "label": "Other_obstacles",
+        "visibility": 1,
+        "center": {
+            "x": 0.5402452743047172,
+            "y": -7.887458557621786,
+            "z": 1.0476531895587586
+        },
+        "size": {
+            "x": 0.15903445294561952,
+            "y": 1.503093669461752,
+            "z": 0.3587500739482813
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 0.0774227706273901
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    },
+    {
+        "id": 406,
+        "uuid": "0808f8a1-8d7d-11f1-88f1-af50e2e94910",
+        "two_wheeled_vehicle": "Manned_motorcycle",
+        "relatedtootherobjects": "no",
+        "label": "two_wheeled_vehicle",
+        "visibility": 1,
+        "center": {
+            "x": 24.891457440237954,
+            "y": -10.249818358747413,
+            "z": 0.5272564759656463
+        },
+        "size": {
+            "x": 1.7325752451035128,
+            "y": 0.640520532324902,
+            "z": 1.5
+        },
+        "rotation": {
+            "x": 0,
+            "y": 0,
+            "z": 1.5899214198939062
+        },
+        "source": {
+            "pinhole_left": "0",
+            "fisheye_front": "0",
+            "fisheye_right": "0",
+            "fisheye_left": "0",
+            "fisheye_rear_right": "0"
+        }
+    }
+]

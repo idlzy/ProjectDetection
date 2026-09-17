@@ -1,0 +1,27 @@
+{
+  "split": "test",
+  "selection_seed": 3407,
+  "sample_token": "mw3d_v5__0804-D119-D120-3d-测试二轮车四轮车-城区-园区道路-白天-1249（1223有效）__2026-07-31_17-41-09__2026-07-31_17_41_12_537",
+  "stem": "2026-07-31_17_41_12_537",
+  "ann_batch": "0804-D119-D120-3d-测试二轮车四轮车-城区-园区道路-白天-1249（1223有效）",
+  "split_group": "0804-D119-D120-3d-测试二轮车四轮车-城区-园区道路-白天-1249（1223有效）__2026-07-31_17-41-09",
+  "source_paths": {
+    "image": "images/731行车数据源_D120_测试两轮车四轮车_园区_白天_889帧/2026-07-31_17-41-09/camera/AIU_Camera_FrontLeft/2026-07-31_17_41_12_537.jpg",
+    "annotation": "annotation/0804-D119-D120-3d-测试二轮车四轮车-城区-园区道路-白天-1249（1223有效）/2026-07-31_17-41-09/json/2026-07-31_17_41_12_537.json",
+    "intrinsic": "images/731行车数据源_D120_测试两轮车四轮车_园区_白天_889帧/2026-07-31_17-41-09/sensor_params/FrontViewCalibParam.json",
+    "extrinsic": "images/731行车数据源_D120_测试两轮车四轮车_园区_白天_889帧/2026-07-31_17-41-09/camera_extrinsic/camera_front_left/2026-07-31_17_41_12_537.txt"
+  },
+  "demo_paths": {
+    "image": "samples/004_2026-07-31_17_41_12_537/image.jpg",
+    "annotation": "samples/004_2026-07-31_17_41_12_537/annotation.json",
+    "intrinsic": "samples/004_2026-07-31_17_41_12_537/FrontViewCalibParam.json",
+    "extrinsic": "samples/004_2026-07-31_17_41_12_537/extrinsic.txt"
+  },
+  "sha256": {
+    "image": "a33f32ba62ccdc98f9d5138e6c89d20d4afd18bef828db5394bf2a4891bb0fe3",
+    "annotation": "972c4c8b345dccb545e95529fe86139596660269816780030f8af965c29d24b2",
+    "intrinsic": "2a166e675a05910e26aad6fb45f479889de1f32a871a8a559c534af25303c214",
+    "extrinsic": "02f45fb37ea9369ae73a4cffbdd9feb6247642f004975dbe0a36ab7413c5e3e1"
+  },
+  "source_data_root": "/home/gy-zb-a-luziyang/datasets/mw3d_0915"
+}
