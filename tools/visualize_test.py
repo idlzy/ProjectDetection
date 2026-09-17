@@ -21,6 +21,9 @@ from project_detection.visualization import (
     draw_camera_view as draw_shared_camera_view,
 )
 
+GROUND_TRUTH_COLOR = (0, 0, 0)
+GROUND_TRUTH_TEXT_COLOR = (255, 255, 255)
+
 
 def color_for_class(class_id):
     hue = int((class_id * 47) % 180)
@@ -28,14 +31,14 @@ def color_for_class(class_id):
     return tuple(int(value) for value in cv2.cvtColor(pixel, cv2.COLOR_HSV2BGR)[0, 0])
 
 
-def draw_label(image, text, origin, color):
+def draw_label(image, text, origin, color, text_color=(0, 0, 0)):
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale, thickness = 0.48, 1
     (width, height), baseline = cv2.getTextSize(text, font, scale, thickness)
     x, y = origin
     y = max(y, height + baseline + 2)
     cv2.rectangle(image, (x, y - height - baseline - 2), (x + width + 4, y), color, -1)
-    cv2.putText(image, text, (x + 2, y - baseline - 1), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
+    cv2.putText(image, text, (x + 2, y - baseline - 1), font, scale, text_color, thickness, cv2.LINE_AA)
 
 
 def camera_box_corners(
@@ -154,11 +157,17 @@ def draw_camera_view(
         for box, label in zip(target["boxes3d"].numpy(), target["labels"]):
             pixels, depth = project_camera_box(box, target)
             rounded, valid = draw_projected_cuboid(
-                image, pixels, depth, (255, 120, 0), 3
+                image, pixels, depth, GROUND_TRUTH_COLOR, 3
             )
             if valid.any():
                 x, y = rounded[valid].min(axis=0).tolist()
-                draw_label(image, "GT " + classes[int(label)], (max(x, 0), max(y, 0)), (255, 120, 0))
+                draw_label(
+                    image,
+                    "GT " + classes[int(label)],
+                    (max(x, 0), max(y, 0)),
+                    GROUND_TRUTH_COLOR,
+                    GROUND_TRUTH_TEXT_COLOR,
+                )
 
     boxes = result["boxes3d"][:max_detections].cpu()
     scores = result["scores"][:max_detections].cpu()
@@ -217,7 +226,13 @@ def draw_bev(target, result, classes, max_detections, size=(700, 700)):
     cv2.circle(canvas, (width // 2, height - 30), 5, (0, 0, 0), -1)
 
     for box in target["boxes3d"].numpy():
-        cv2.polylines(canvas, [project(bev_corners(box))], True, (255, 120, 0), 2)
+        cv2.polylines(
+            canvas,
+            [project(bev_corners(box))],
+            True,
+            GROUND_TRUTH_COLOR,
+            2,
+        )
     for box, score, label in zip(
         result["boxes3d"][:max_detections].cpu().numpy(),
         result["scores"][:max_detections].cpu().numpy(),
@@ -227,7 +242,7 @@ def draw_bev(target, result, classes, max_detections, size=(700, 700)):
         color = color_for_class(int(label))
         cv2.polylines(canvas, [points], True, color, 2)
         cv2.putText(canvas, "%.2f" % score, tuple(points[0]), cv2.FONT_HERSHEY_SIMPLEX, .4, color, 1)
-    cv2.putText(canvas, "GT=cyan, prediction=class color", (20, 22), cv2.FONT_HERSHEY_SIMPLEX, .5, (30, 30, 30), 1)
+    cv2.putText(canvas, "GT=black, prediction=class color", (20, 22), cv2.FONT_HERSHEY_SIMPLEX, .5, (30, 30, 30), 1)
     return canvas
 
 

@@ -41,6 +41,15 @@ def main():
     parser.add_argument("--save-bev", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--max-images", type=int)
+    parser.add_argument(
+        "--sample-token",
+        help="Only draw the manifest record with this exact sample_token",
+    )
+    parser.add_argument(
+        "--ignore-extrinsic-rel",
+        action="store_true",
+        help="Ignore per-frame extrinsic_rel and use calibration JSON parameters",
+    )
     parser.add_argument("--set", action="append", default=[], dest="overrides")
     args = parser.parse_args()
 
@@ -49,9 +58,26 @@ def main():
         config,
         args.split,
         world_size=1,
-        max_samples=args.max_images,
+        max_samples=None if args.sample_token else args.max_images,
     )
     dataset = loader.dataset
+    if args.sample_token:
+        matches = [
+            record
+            for record in dataset.records
+            if record.get("sample_token") == args.sample_token
+        ]
+        if not matches:
+            parser.error(
+                "sample_token not found in %s split: %s"
+                % (args.split, args.sample_token)
+            )
+        dataset.records = matches
+    if args.ignore_extrinsic_rel:
+        dataset.records = [
+            {key: value for key, value in record.items() if key != "extrinsic_rel"}
+            for record in dataset.records
+        ]
     data_root = Path(config["data"]["data_root"]).resolve()
     output_dir = Path(args.output_dir)
     classes = config["data"]["classes"]

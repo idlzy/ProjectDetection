@@ -61,7 +61,7 @@ def output_paths(image_path, input_path, output, multiple):
     )
 
 
-def prepare_image(image_path, calibration_path, config):
+def prepare_image(image_path, calibration_path, config, extrinsic_path=None):
     image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
     if image is None:
         raise FileNotFoundError("Cannot read image: %s" % image_path)
@@ -77,7 +77,7 @@ def prepare_image(image_path, calibration_path, config):
     canvas[:height, :width] = cv2.resize(image, (width, height))
 
     calibration = load_front_left_calibration(
-        calibration_path, (original_h, original_w)
+        calibration_path, (original_h, original_w), extrinsic_path=extrinsic_path
     )
     camera_matrix = calibration["k"].copy()
     camera_matrix[0] *= scale
@@ -118,6 +118,10 @@ def main():
         help="Calibration file shared by all input images",
     )
     parser.add_argument(
+        "--extrinsic",
+        help="Optional HAT-format vehicle-to-camera extrinsic shared by all inputs",
+    )
+    parser.add_argument(
         "--output",
         help="Output image for one input, or output directory for a folder input",
     )
@@ -138,6 +142,9 @@ def main():
     calibration_path = Path(args.calib)
     if not calibration_path.is_file():
         raise FileNotFoundError(calibration_path)
+    extrinsic_path = Path(args.extrinsic) if args.extrinsic else None
+    if extrinsic_path is not None and not extrinsic_path.is_file():
+        raise FileNotFoundError(extrinsic_path)
     images = collect_images(input_path, args.recursive)
     multiple = input_path.is_dir()
     output = Path(args.output) if args.output else None
@@ -158,7 +165,7 @@ def main():
 
     for sequence, image_path in enumerate(images, start=1):
         original, tensor, target = prepare_image(
-            image_path, calibration_path, config
+            image_path, calibration_path, config, extrinsic_path
         )
         with torch.no_grad():
             outputs = model(tensor.unsqueeze(0).to(device))

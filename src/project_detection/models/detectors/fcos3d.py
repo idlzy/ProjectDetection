@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from torch import nn
 
-from ..backbones import EfficientNetB0HatCompatible, ResNet101FCOS3D
-from ..heads import FCOS3DHead
-from ..necks import BiFPN, FPN
+from ..backbones import (
+    EfficientNetB0HatCompatible,
+    LegacyHatEfficientNetB0,
+    ResNet101FCOS3D,
+)
+from ..heads import FCOS3DHead, LegacyHatFCOS3DHead
+from ..necks import BiFPN, FPN, LegacyHatBiFPN
 
 
 class FCOS3D(nn.Module):
@@ -32,6 +36,8 @@ class FCOS3D(nn.Module):
         super().__init__()
         if backbone == "efficientnet_b0_hat_compatible":
             self.backbone = EfficientNetB0HatCompatible()
+        elif backbone == "legacy_hat_efficientnet_b0":
+            self.backbone = LegacyHatEfficientNetB0()
         elif backbone == "resnet101_fcos3d":
             self.backbone = ResNet101FCOS3D(
                 dcn_stages=backbone_dcn_stages,
@@ -46,24 +52,40 @@ class FCOS3D(nn.Module):
             self.neck = BiFPN(
                 self.backbone.out_channels, neck_channels, bifpn_stacks
             )
+        elif neck == "legacy_hat_bifpn":
+            self.neck = LegacyHatBiFPN(
+                stacks=bifpn_stacks, out_channels=neck_channels
+            )
         elif neck == "fpn":
             self.neck = FPN(self.backbone.out_channels, neck_channels)
         else:
             raise ValueError("Unknown neck: %s" % neck)
-        self.head = FCOS3DHead(
-            num_classes=num_classes,
-            in_channels=neck_channels,
-            feat_channels=head_channels,
-            stacked_convs=stacked_convs,
-            num_attrs=num_attrs,
-            probabilistic_depth=probabilistic_depth,
-            geometric_depth=geometric_depth,
-            depth_bin_unit=depth_bin_unit,
-            depth_bin_max=depth_bin_max,
-            normalization=head_norm,
-            dcn_on_last_conv=dcn_on_last_conv,
-            deform_groups=deform_groups,
-        )
+        if backbone == "legacy_hat_efficientnet_b0":
+            self.head = LegacyHatFCOS3DHead(
+                num_classes=num_classes,
+                in_channels=neck_channels,
+                feat_channels=head_channels,
+                stacked_convs=stacked_convs,
+                num_attrs=num_attrs,
+                probabilistic_depth=probabilistic_depth,
+                depth_bin_unit=depth_bin_unit,
+                depth_bin_max=depth_bin_max,
+            )
+        else:
+            self.head = FCOS3DHead(
+                num_classes=num_classes,
+                in_channels=neck_channels,
+                feat_channels=head_channels,
+                stacked_convs=stacked_convs,
+                num_attrs=num_attrs,
+                probabilistic_depth=probabilistic_depth,
+                geometric_depth=geometric_depth,
+                depth_bin_unit=depth_bin_unit,
+                depth_bin_max=depth_bin_max,
+                normalization=head_norm,
+                dcn_on_last_conv=dcn_on_last_conv,
+                deform_groups=deform_groups,
+            )
 
     def forward(self, images):
         features = self.backbone(images)

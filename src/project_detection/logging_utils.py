@@ -57,10 +57,16 @@ def configure_training_logging(output_dir: Path, rank: int = 0, level: str = "IN
     return logger
 
 
-def log_runtime_environment(logger, torch_module, device, world_size: int) -> None:
+def log_runtime_environment(
+    logger, torch_module, device, world_size: int, rank: int = 0, local_rank: int = 0
+) -> None:
     logger.info(
-        "Runtime | torch=%s | device=%s | world_size=%d | cwd=%s",
+        "Runtime | torch=%s | launch_mode=%s | rank=%d | local_rank=%d | "
+        "device=%s | world_size=%d | cwd=%s",
         torch_module.__version__,
+        "ddp" if world_size > 1 else "single",
+        rank,
+        local_rank,
         device,
         world_size,
         os.getcwd(),

@@ -10,6 +10,7 @@ readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.8"
 dependencies = [
   "numpy>=1.19,<2",
+  "matplotlib>=3.3",
   "opencv-python-headless>=4.6",
   "PyYAML>=5.4",
   "torch>=1.13",
@@ -36,5 +37,5 @@ include = ["project_detection*"]
 namespaces = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["test"]
 pythonpath = ["src"]

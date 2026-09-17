@@ -13,11 +13,14 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+offline_packages/
+/tools/_archive/
 
-# 模型与实验产物
+# 配置与模型与实验产物
 outputs/
 checkpoints/
 kitti_gt/
+configs/
 *.pth
 *.pth.tar
 *.pt
@@ -35,6 +38,9 @@ logs/
 .idea/
 *.swp
 *.swo
+
+# 本地开发方案文档（不纳入版本控制）
+/docs/开发文档/
 
 # OS
 .DS_Store

@@ -56,8 +56,11 @@ def validate_records(records: Sequence[dict], data_root: Path, check_files: bool
             raise ValueError("Duplicate sample_token at record %d: %s" % (index, token))
         seen_tokens.add(token)
         if check_files:
-            for key in ("image_rel", "ann_rel", "calib_rel"):
-                path = data_root / record[key]
+            paths = [(key, record[key]) for key in ("image_rel", "ann_rel", "calib_rel")]
+            if record.get("extrinsic_rel"):
+                paths.append(("extrinsic_rel", record["extrinsic_rel"]))
+            for key, relative_path in paths:
+                path = data_root / relative_path
                 if not path.is_file() and len(missing_files) < 20:
                     missing_files.append("%s=%s" % (key, path))
     if missing_files:

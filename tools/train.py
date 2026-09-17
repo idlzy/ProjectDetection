@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import os
 from pathlib import Path
 
 from project_detection.config import load_config
@@ -9,7 +10,11 @@ from project_detection.logging_utils import LOGGER_NAME, set_process_name
 
 
 def main():
-    set_process_name("DetectionTrain")
+    rank = int(os.environ.get("RANK", "0"))
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    set_process_name(
+        "DetectionTrain-r%d" % rank if world_size > 1 else "DetectionTrain"
+    )
     parser = argparse.ArgumentParser(description="Train FCOS3D/PGDA")
     parser.add_argument("--config", required=True)
     parser.add_argument(

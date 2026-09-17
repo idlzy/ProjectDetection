@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import torch
+import torch.distributed as distributed
 import torch.nn.functional as functional
 from torch import nn
 
 from .depth_propagation import propagate_geometric_depth
-from .targets import assign_targets, feature_points
+from .targets import assign_targets_batch, feature_points, prepare_target_batch
 
 
 def sigmoid_focal_loss(logits, targets, alpha=0.25, gamma=2.0, reduction="sum"):
@@ -18,13 +19,14 @@ def sigmoid_focal_loss(logits, targets, alpha=0.25, gamma=2.0, reduction="sum"):
 
 
 class FCOS3DLoss(nn.Module):
-    def __init__(self, model, num_classes, strides, regress_ranges,
-                 geometry_config=None, class_names=None):
+    def __init__(self, num_classes, strides, regress_ranges,
+                 geometry_config=None, class_names=None,
+                 target_assignment_chunk_size=8):
         super().__init__()
-        self.model = model
         self.num_classes = num_classes
         self.strides = strides
         self.regress_ranges = regress_ranges
+        self.target_assignment_chunk_size = int(target_assignment_chunk_size)
         self.geometry = geometry_config or {}
         enabled_names = set(self.geometry.get("classes", class_names or []))
         self.geometry_class_ids = {
@@ -32,25 +34,53 @@ class FCOS3DLoss(nn.Module):
             if name in enabled_names
         }
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets, head):
         loss_cls = outputs[0]["cls"].new_tensor(0.0)
         loss_bbox = loss_cls.clone(); loss_dir = loss_cls.clone(); loss_center = loss_cls.clone()
-        positives = 0
+        positives = loss_cls.new_zeros(())
         nodes_by_image = [[] for _ in targets]
+        prepared_targets = prepare_target_batch(
+            targets, outputs[0]["cls"].device
+        )
         for prediction, stride, regress_range in zip(outputs, self.strides, self.regress_ranges):
             batch, _, height, width = prediction["cls"].shape
             points = feature_points(height, width, stride, prediction["cls"].device)
-            for image_index in range(batch):
-                labels, regression_target, center_target, direction_target, matched_indices = assign_targets(
-                    points, targets[image_index], regress_range, stride)
-                cls_logits = prediction["cls"][image_index].permute(1, 2, 0).reshape(-1, self.num_classes)
-                one_hot = torch.zeros_like(cls_logits)
+            cls_logits = prediction["cls"].permute(0, 2, 3, 1).reshape(
+                batch, -1, self.num_classes
+            )
+            batched_assignment = assign_targets_batch(
+                points,
+                prepared_targets,
+                regress_range,
+                stride,
+                image_chunk_size=self.target_assignment_chunk_size,
+            )
+            assignments = list(zip(*batched_assignment))
+
+            labels_by_image = torch.stack(
+                [assignment[0] for assignment in assignments]
+            )
+            one_hot = torch.zeros_like(cls_logits)
+            positive_locations = torch.where(labels_by_image >= 0)
+            if positive_locations[0].numel():
+                one_hot[
+                    positive_locations[0],
+                    positive_locations[1],
+                    labels_by_image[positive_locations],
+                ] = 1
+            loss_cls = loss_cls + sigmoid_focal_loss(cls_logits, one_hot)
+
+            for image_index, assignment in enumerate(assignments):
+                (
+                    labels,
+                    regression_target,
+                    center_target,
+                    direction_target,
+                    matched_indices,
+                ) = assignment
                 positive = labels >= 0
-                if positive.any(): one_hot[positive, labels[positive]] = 1
-                loss_cls = loss_cls + sigmoid_focal_loss(cls_logits, one_hot)
-                if not positive.any():
-                    continue
-                positives += int(positive.sum())
+                positives = positives + positive.sum()
+                image_cls_logits = cls_logits[image_index]
                 raw = prediction["bbox"][image_index].permute(1, 2, 0).reshape(-1, 9)[positive]
                 depth_logits = None
                 if prediction["depth_logits"] is not None:
@@ -69,13 +99,13 @@ class FCOS3DLoss(nn.Module):
                     "depth_logits": depth_logits,
                     "geo_weight": geo_weight,
                     "centers2d": points[positive] + raw[:, :2] * float(stride),
-                    "class_probabilities": cls_logits[positive].sigmoid(),
+                    "class_probabilities": image_cls_logits[positive].sigmoid(),
                     "labels": labels[positive],
                     "instance_ids": matched_indices[positive],
                 })
 
         for image_index, chunks in enumerate(nodes_by_image):
-            if not chunks:
+            if not chunks or sum(chunk["raw"].shape[0] for chunk in chunks) == 0:
                 continue
             raw = torch.cat([chunk["raw"] for chunk in chunks])
             regression_target = torch.cat([chunk["target"] for chunk in chunks])
@@ -83,7 +113,7 @@ class FCOS3DLoss(nn.Module):
             depth_logits = None
             if chunks[0]["depth_logits"] is not None:
                 depth_logits = torch.cat([chunk["depth_logits"] for chunk in chunks])
-            local_depth, depth_confidence = self.model.head.decode_depth_candidates(
+            local_depth, depth_confidence = head.decode_depth_candidates(
                 raw[:, 2], depth_logits
             )
             geometric_depth = local_depth.detach()
@@ -115,7 +145,7 @@ class FCOS3DLoss(nn.Module):
                     min_horizon_distance=self.geometry.get("min_horizon_distance", 0.01),
                     return_validity=True,
                 )
-            depth = self.model.head.fuse_geometric_depth(
+            depth = head.fuse_geometric_depth(
                 local_depth, geometric_depth, geo_weight, geometry_valid
             )
             decoded = raw.clone()
@@ -135,7 +165,14 @@ class FCOS3DLoss(nn.Module):
             loss_center = loss_center + functional.binary_cross_entropy_with_logits(
                 center_logits, center_target, reduction="sum"
             )
-        normalizer = max(positives, 1)
+        normalizer = positives.detach().clone()
+        if distributed.is_available() and distributed.is_initialized():
+            distributed.all_reduce(normalizer, op=distributed.ReduceOp.SUM)
+            # DDP averages gradients across ranks. Dividing each local loss by
+            # global_positives / world_size yields a global sum/global count
+            # after that gradient average.
+            normalizer = normalizer / distributed.get_world_size()
+        normalizer = normalizer.clamp_min(1)
         losses = {
             "loss_cls": loss_cls / normalizer,
             "loss_bbox": loss_bbox / normalizer,

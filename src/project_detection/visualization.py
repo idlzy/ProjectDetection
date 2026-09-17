@@ -13,6 +13,8 @@ CUBOID_EDGES = (
     (4, 5), (5, 6), (6, 7), (7, 4),
     (0, 4), (1, 5), (2, 6), (3, 7),
 )
+GROUND_TRUTH_COLOR = (0, 0, 0)
+GROUND_TRUTH_TEXT_COLOR = (255, 255, 255)
 
 
 def color_for_class(class_id):
@@ -23,7 +25,7 @@ def color_for_class(class_id):
     )
 
 
-def draw_label(image, text, origin, color):
+def draw_label(image, text, origin, color, text_color=(0, 0, 0)):
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale, thickness = 0.48, 1
     (width, height), baseline = cv2.getTextSize(
@@ -44,7 +46,7 @@ def draw_label(image, text, origin, color):
         (x + 2, y - baseline - 1),
         font,
         scale,
-        (0, 0, 0),
+        text_color,
         thickness,
         cv2.LINE_AA,
     )
@@ -152,7 +154,7 @@ def draw_camera_view(
             box = box.cpu().numpy() if hasattr(box, "cpu") else np.asarray(box)
             pixels, depth = project_camera_box(box, target)
             rounded, valid = draw_projected_cuboid(
-                image, pixels, depth, (255, 120, 0), 3
+                image, pixels, depth, GROUND_TRUTH_COLOR, 3
             )
             if valid.any():
                 x, y = rounded[valid].min(axis=0).tolist()
@@ -160,7 +162,8 @@ def draw_camera_view(
                     image,
                     "GT " + classes[int(label)],
                     (max(x, 0), max(y, 0)),
-                    (255, 120, 0),
+                    GROUND_TRUTH_COLOR,
+                    GROUND_TRUTH_TEXT_COLOR,
                 )
 
     boxes = result["boxes3d"][:max_detections].cpu()
@@ -252,7 +255,11 @@ def draw_bev(
         for box in target.get("boxes3d", []):
             box = box.cpu().numpy() if hasattr(box, "cpu") else np.asarray(box)
             cv2.polylines(
-                canvas, [project(bev_corners(box))], True, (255, 120, 0), 2
+                canvas,
+                [project(bev_corners(box))],
+                True,
+                GROUND_TRUTH_COLOR,
+                2,
             )
     for box, score, label in zip(
         result["boxes3d"][:max_detections].cpu().numpy(),
@@ -273,7 +280,7 @@ def draw_bev(
         )
     legend = "prediction=class color"
     if draw_ground_truth and len(target.get("boxes3d", [])):
-        legend = "GT=cyan, " + legend
+        legend = "GT=black, " + legend
     cv2.putText(
         canvas,
         legend,

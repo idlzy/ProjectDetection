@@ -12,12 +12,17 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.distributed as distributed
 import yaml
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.data import DataLoader, DistributedSampler, Sampler
+from torch.utils.data import DataLoader, DistributedSampler
 
-from .data import Mw3dReadyDataset, collate_detection_batch
+from . import distributed as distributed_utils
+from .data import (
+    DistributedEvalSampler,
+    EpochRandomSampler,
+    Mw3dReadyDataset,
+    collate_detection_batch,
+)
 from .logging_utils import configure_training_logging, log_runtime_environment
 from .metrics import Mw3dMetric
 from .models import build_model
@@ -28,24 +33,24 @@ class NonFiniteTrainingError(RuntimeError):
     """Raised before invalid numerical values can corrupt a checkpoint."""
 
 
-class EpochRandomSampler(Sampler):
-    """Deterministic single-rank shuffle, allowing mid-epoch recovery."""
+class DetectionTrainingStep(torch.nn.Module):
+    """Keep detector forward and parameter-dependent loss inside DDP forward.
 
-    def __init__(self, data_source, seed=0):
-        self.data_source = data_source
-        self.seed = int(seed)
-        self.epoch = 0
+    The probabilistic-depth loss uses ``head.depth_fuse_logit`` while decoding
+    candidates.  Calling that head method after ``DDP(detector)(images)`` makes
+    the parameter appear unused to DDP and then introduces it into autograd
+    outside the wrapped forward.  Wrapping this complete training step gives
+    DDP one accurate graph boundary without changing the detector state dict.
+    """
 
-    def set_epoch(self, epoch):
-        self.epoch = int(epoch)
+    def __init__(self, detector, criterion):
+        super().__init__()
+        self.detector = detector
+        self.criterion = criterion
 
-    def __iter__(self):
-        generator = torch.Generator()
-        generator.manual_seed(self.seed + self.epoch)
-        return iter(torch.randperm(len(self.data_source), generator=generator).tolist())
-
-    def __len__(self):
-        return len(self.data_source)
+    def forward(self, images, targets):
+        outputs = self.detector(images)
+        return self.criterion(outputs, targets, self.detector.head)
 
 
 def _tensor_data(tensor):
@@ -97,11 +102,7 @@ def _nonfinite_tensor_details(named_tensors, limit=20):
 
 
 def _all_ranks_finite(local_finite, device):
-    if not distributed.is_initialized():
-        return local_finite
-    flag = torch.tensor(int(local_finite), dtype=torch.int32, device=device)
-    distributed.all_reduce(flag, op=distributed.ReduceOp.MIN)
-    return bool(flag.item())
+    return distributed_utils.all_ranks_true(local_finite, device)
 
 
 def _loss_snapshot(losses):
@@ -178,20 +179,23 @@ def _trip_nonfinite_guard(
     raise NonFiniteTrainingError(message)
 
 
-def setup_distributed():
-    world_size = int(os.environ.get("WORLD_SIZE", "1")); local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    if world_size > 1 and not distributed.is_initialized():
-        distributed.init_process_group(backend="nccl")
-        torch.cuda.set_device(local_rank)
-    return local_rank, world_size
+def setup_distributed(config=None):
+    runtime = (config or {}).get("runtime", {})
+    return distributed_utils.initialize(
+        runtime.get("distributed_backend", "nccl"),
+        runtime.get("distributed_timeout_seconds", 600),
+    )
 
 
 def seed_everything(seed):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
 
 
-def build_loader(config, split, world_size=1, max_samples=None):
+def build_loader(config, split, world_size=1, max_samples=None, rank=0):
     data = config["data"]
+    sharing_strategy = data.get("multiprocessing_sharing_strategy")
+    if sharing_strategy is not None:
+        torch.multiprocessing.set_sharing_strategy(sharing_strategy)
     dataset = Mw3dReadyDataset(
         data["data_root"],
         data.get("ready_root"),
@@ -204,22 +208,44 @@ def build_loader(config, split, world_size=1, max_samples=None):
         pad_value=data.get("pad_value", (0.0, 0.0, 0.0)),
     )
     sampler = None
-    if world_size > 1:
+    if world_size > 1 and split == "train":
         sampler = DistributedSampler(
             dataset,
+            num_replicas=world_size,
+            rank=rank,
             shuffle=split == "train",
             seed=int(config["experiment"]["seed"]),
+            drop_last=True,
         )
+    elif world_size > 1:
+        sampler = DistributedEvalSampler(dataset, world_size, rank)
     elif split == "train":
         sampler = EpochRandomSampler(dataset, config["experiment"]["seed"])
     worker_generator = torch.Generator()
     worker_generator.manual_seed(
-        int(config["experiment"]["seed"]) + (0 if split == "train" else 100000)
+        int(config["experiment"]["seed"])
+        + (0 if split == "train" else 100000)
+        + rank * 1000
     )
-    return DataLoader(dataset, batch_size=data["batch_size_per_gpu"], shuffle=False,
-                      sampler=sampler, num_workers=data["num_workers"], pin_memory=True,
-                      collate_fn=collate_detection_batch, drop_last=split == "train",
-                      generator=worker_generator)
+    loader_kwargs = {}
+    if data["num_workers"] > 0:
+        # CUDA is initialized before DataLoader starts its workers. Linux'
+        # default ``fork`` would copy CUDA driver handles into each worker,
+        # allowing an orphan worker to retain a crashed rank's CUDA context.
+        # ``spawn`` starts each worker in a clean Python interpreter instead.
+        loader_kwargs["multiprocessing_context"] = "spawn"
+    return DataLoader(
+        dataset,
+        batch_size=data["batch_size_per_gpu"],
+        shuffle=False,
+        sampler=sampler,
+        num_workers=data["num_workers"],
+        pin_memory=False,
+        collate_fn=collate_detection_batch,
+        drop_last=split == "train",
+        generator=worker_generator,
+        **loader_kwargs,
+    )
 
 
 def _json_value(value):
@@ -232,54 +258,77 @@ def _json_value(value):
 def evaluate(model, loader, config, device):
     model.eval(); raw_model = model.module if hasattr(model, "module") else model
     processor = FCOS3DPostProcessor(raw_model, config)
-    metric = Mw3dMetric(config["data"]["classes"], config["evaluation"]["distance_thresholds"])
+    evaluation = config["evaluation"]
+    metric = Mw3dMetric(
+        config["data"]["classes"],
+        evaluation["distance_thresholds"],
+        tp_distance_threshold=evaluation.get("tp_distance_threshold", 2.0),
+        min_recall=evaluation.get("min_recall", 0.1),
+        min_precision=evaluation.get("min_precision", 0.1),
+        mean_ap_weight=evaluation.get("mean_ap_weight", 5.0),
+        depth_bins=evaluation.get("depth_bins"),
+        evaluated_classes=evaluation.get("classes"),
+    )
     for images, targets in loader:
         images = images.to(device, non_blocking=True)
-        metric.update(processor(model(images), targets), targets)
-    if distributed.is_initialized():
-        states = [None for _ in range(distributed.get_world_size())]
-        distributed.all_gather_object(states, metric.state_dict())
-        metric.load_state_dict([item for state in states for item in state])
+        # Run the unwrapped module during validation. DDP forward may perform
+        # buffer collectives, which would deadlock when the no-padding eval
+        # sampler gives ranks different batch counts.
+        metric.update(processor(raw_model(images), targets), targets)
+    states = distributed_utils.gather_object_to_main(metric.state_dict())
+    if not distributed_utils.is_main_process():
+        return None
+    metric.load_state_dict([item for state in states for item in state])
     return _json_value(metric.compute())
 
 
-def _capture_random_state():
+def _capture_random_state(device=None):
     state = {
         "python": random.getstate(),
         "numpy": np.random.get_state(),
         "torch": torch.get_rng_state(),
     }
     if torch.cuda.is_available():
-        state["cuda"] = torch.cuda.get_rng_state_all()
+        cuda_device = device if device is not None else torch.cuda.current_device()
+        state["cuda"] = torch.cuda.get_rng_state(cuda_device)
     return state
 
 
-def _restore_random_state(state):
+def _restore_random_state(state, device=None):
     if not state:
         return
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
     torch.set_rng_state(state["torch"])
     if "cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        cuda_state = state["cuda"]
+        if isinstance(cuda_state, (list, tuple)):
+            # Backward compatibility with checkpoints that stored all devices.
+            torch.cuda.set_rng_state_all(cuda_state)
+        else:
+            cuda_device = device if device is not None else torch.cuda.current_device()
+            torch.cuda.set_rng_state(cuda_state, cuda_device)
 
 
 def save_checkpoint(
     path, model, optimizer, scheduler, scaler, epoch, best_metric, config,
-    step_in_epoch=None,
+    step_in_epoch=None, random_states=None, distributed_state=None,
 ):
     path.parent.mkdir(parents=True, exist_ok=True)
     raw_model = model.module if hasattr(model, "module") else model
     temporary = path.with_suffix(path.suffix + ".tmp")
+    local_random_state = _capture_random_state()
     torch.save({"model": raw_model.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(), "scaler": scaler.state_dict(),
                 "epoch": epoch, "step_in_epoch": step_in_epoch,
                 "best_metric": best_metric, "config": config,
-                "random_state": _capture_random_state()}, temporary)
+                "random_state": local_random_state,
+                "random_states": random_states,
+                "distributed_state": distributed_state}, temporary)
     os.replace(str(temporary), str(path))
 
 
 def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None, strict=True,
-                    restore_random_state=False):
+                    restore_random_state=False, rank=0, device=None):
     try:
         # Project checkpoints contain optimizer/config/RNG metadata and are
         # trusted local artifacts, not tensor-only interchange files.
@@ -295,34 +344,124 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None, st
     if scheduler is not None and "scheduler" in checkpoint: scheduler.load_state_dict(checkpoint["scheduler"])
     if scaler is not None and "scaler" in checkpoint: scaler.load_state_dict(checkpoint["scaler"])
     if restore_random_state:
-        _restore_random_state(checkpoint.get("random_state"))
+        random_states = checkpoint.get("random_states")
+        state = (
+            random_states[rank]
+            if random_states is not None and rank < len(random_states)
+            else checkpoint.get("random_state")
+        )
+        _restore_random_state(state, device)
     return checkpoint, result
 
 
+def _distributed_checkpoint_state(config, world_size, steps_per_epoch):
+    batch_per_gpu = int(config["data"]["batch_size_per_gpu"])
+    return {
+        "world_size": int(world_size),
+        "batch_size_per_gpu": batch_per_gpu,
+        "global_batch_size": batch_per_gpu * int(world_size),
+        "steps_per_epoch": int(steps_per_epoch),
+    }
+
+
+def _save_training_checkpoint(
+    path,
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+    epoch,
+    best_metric,
+    config,
+    device,
+    world_size,
+    steps_per_epoch,
+    step_in_epoch=None,
+):
+    random_states = distributed_utils.gather_object_to_main(
+        _capture_random_state(device)
+    )
+    save_error = None
+    if distributed_utils.is_main_process():
+        try:
+            save_checkpoint(
+                path,
+                model,
+                optimizer,
+                scheduler,
+                scaler,
+                epoch,
+                best_metric,
+                config,
+                step_in_epoch=step_in_epoch,
+                random_states=random_states,
+                distributed_state=_distributed_checkpoint_state(
+                    config, world_size, steps_per_epoch
+                ),
+            )
+        except BaseException as error:
+            save_error = "%s: %s" % (type(error).__name__, error)
+    save_error = distributed_utils.broadcast_object_from_main(save_error)
+    if save_error is not None:
+        raise RuntimeError("rank 0 checkpoint save failed: %s" % save_error)
+    distributed_utils.barrier()
+
+
+def _validate_resume_topology(checkpoint, config, world_size, steps_per_epoch):
+    if checkpoint.get("step_in_epoch") is None:
+        return
+    expected = _distributed_checkpoint_state(config, world_size, steps_per_epoch)
+    saved = checkpoint.get("distributed_state")
+    if saved is None:
+        if world_size == 1:
+            return
+        raise RuntimeError(
+            "mid-epoch checkpoint has no distributed topology metadata; "
+            "resume it with one GPU or use an epoch-boundary last.pth"
+        )
+    mismatches = [
+        key for key in ("world_size", "batch_size_per_gpu", "steps_per_epoch")
+        if int(saved.get(key, -1)) != int(expected[key])
+    ]
+    if mismatches and not config["train"].get(
+        "allow_world_size_change_on_resume", False
+    ):
+        details = ", ".join(
+            "%s=%s->%s" % (key, saved.get(key), expected[key])
+            for key in mismatches
+        )
+        raise RuntimeError(
+            "incompatible mid-epoch resume topology (%s); preserve the original "
+            "GPU/batch layout or resume from an epoch-boundary last.pth" % details
+        )
+
+
 def train(config):
-    local_rank, world_size = setup_distributed(); rank = distributed.get_rank() if distributed.is_initialized() else 0
+    local_rank, world_size = setup_distributed(config)
+    rank = distributed_utils.rank()
     seed_everything(config["experiment"]["seed"] + rank)
     requested_device = config["runtime"]["device"]
     device = torch.device("cuda", local_rank) if requested_device == "cuda" and torch.cuda.is_available() else torch.device("cpu")
     output_dir = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"]
     logger = configure_training_logging(output_dir, rank, config["runtime"].get("log_level", "INFO"))
-    native_crash_handle = None
-    if rank == 0:
-        native_crash_path = output_dir / "logs" / "native_crash.log"
-        native_crash_handle = native_crash_path.open("a", encoding="utf-8")
-        faulthandler.enable(file=native_crash_handle, all_threads=True)
+    native_crash_name = "native_crash.log" if rank == 0 else "native_crash.rank%d.log" % rank
+    native_crash_path = output_dir / "logs" / native_crash_name
+    native_crash_handle = native_crash_path.open("a", encoding="utf-8")
+    faulthandler.enable(file=native_crash_handle, all_threads=True)
 
-        def log_termination_signal(signum, _frame):
-            logger.critical(
-                "Training received signal | signal=%s | number=%d",
-                signal.Signals(signum).name,
-                signum,
-            )
-            raise SystemExit(128 + signum)
+    def log_termination_signal(signum, _frame):
+        logger.critical(
+            "Training received signal | signal=%s | number=%d | rank=%d | local_rank=%d",
+            signal.Signals(signum).name,
+            signum,
+            rank,
+            local_rank,
+        )
+        raise SystemExit(128 + signum)
 
-        for termination_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-            signal.signal(termination_signal, log_termination_signal)
-    log_runtime_environment(logger, torch, device, world_size)
+    for termination_signal in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(termination_signal, log_termination_signal)
+    log_runtime_environment(logger, torch, device, world_size, rank, local_rank)
     if rank == 0:
         output_dir.mkdir(parents=True, exist_ok=True)
         with (output_dir / "resolved_config.yaml").open("w", encoding="utf-8") as handle: yaml.safe_dump(config, handle, sort_keys=False, allow_unicode=True)
@@ -330,7 +469,12 @@ def train(config):
         logger.info("Data configuration:\n%s", yaml.safe_dump(config["data"], sort_keys=False, allow_unicode=True).rstrip())
         logger.info("Model configuration:\n%s", yaml.safe_dump(config["model"], sort_keys=False, allow_unicode=True).rstrip())
         logger.info("Training hyperparameters:\n%s", yaml.safe_dump(config["train"], sort_keys=False, allow_unicode=True).rstrip())
+        logger.info("Evaluation configuration:\n%s", yaml.safe_dump(config["evaluation"], sort_keys=False, allow_unicode=True).rstrip())
         logger.info("Runtime configuration:\n%s", yaml.safe_dump(config["runtime"], sort_keys=False, allow_unicode=True).rstrip())
+        logger.info(
+            "Evaluation protocol | name=nusc_cvpr2019_formulas_on_mw3d_camera_bev "
+            "| NDS_variant=nusc_cvpr2019_3tp | TP_terms=mATE,mASE,mAOE"
+        )
     model = build_model(config).to(device)
     if rank == 0:
         total_parameters = sum(parameter.numel() for parameter in model.parameters())
@@ -343,8 +487,14 @@ def train(config):
         enabled=config["train"]["amp"] and device.type == "cuda",
         init_scale=float(config["train"].get("amp_initial_scale", 2048.0)),
     )
-    train_loader = build_loader(config, "train", world_size, config["runtime"].get("max_train_samples"))
-    val_loader = build_loader(config, "val", world_size, config["runtime"].get("max_val_samples"))
+    train_loader = build_loader(
+        config, "train", world_size,
+        config["runtime"].get("max_train_samples"), rank,
+    )
+    val_loader = build_loader(
+        config, "val", world_size,
+        config["runtime"].get("max_val_samples"), rank,
+    )
     total_steps = max(config["train"]["epochs"] * len(train_loader), 1)
     warmup_steps = max(int(total_steps * config["train"]["lr_warmup_fraction"]), 1)
 
@@ -368,6 +518,13 @@ def train(config):
             len(val_loader),
         )
         logger.info(
+            "Calibration sources | train extrinsic_rel=%d calib_json=%d | val extrinsic_rel=%d calib_json=%d",
+            train_loader.dataset.manifest_extrinsic_samples,
+            train_loader.dataset.calibration_json_samples,
+            val_loader.dataset.manifest_extrinsic_samples,
+            val_loader.dataset.calibration_json_samples,
+        )
+        logger.info(
             "Training schedule | epochs=%d | steps_per_epoch=%d | total_steps=%d | batch_per_gpu=%d | global_batch=%d | warmup_steps=%d",
             config["train"]["epochs"],
             len(train_loader),
@@ -381,8 +538,16 @@ def train(config):
     if resume:
         checkpoint, _ = load_checkpoint(
             resume, model, optimizer, scheduler, scaler, strict=True,
-            restore_random_state=True,
+            restore_random_state=False,
         )
+        _validate_resume_topology(checkpoint, config, world_size, len(train_loader))
+        random_states = checkpoint.get("random_states")
+        state = (
+            random_states[rank]
+            if random_states is not None and rank < len(random_states)
+            else checkpoint.get("random_state")
+        )
+        _restore_random_state(state, device)
         checkpoint_step = checkpoint.get("step_in_epoch")
         if checkpoint_step is None:
             start_epoch = checkpoint.get("epoch", -1) + 1
@@ -415,10 +580,24 @@ def train(config):
             len(load_result.missing_keys),
             len(load_result.unexpected_keys),
         )
-    if world_size > 1: model = DistributedDataParallel(model, device_ids=[local_rank])
-    criterion = FCOS3DLoss(model.module if hasattr(model, "module") else model, len(config["data"]["classes"]),
-                           config["model"]["strides"], config["model"]["regress_ranges"],
-                           config["model"].get("geometry"), config["data"]["classes"])
+    criterion = FCOS3DLoss(
+        len(config["data"]["classes"]),
+        config["model"]["strides"],
+        config["model"]["regress_ranges"],
+        config["model"].get("geometry"),
+        config["data"]["classes"],
+        config["train"].get("target_assignment_chunk_size", 8),
+    )
+    training_step = DetectionTrainingStep(model, criterion)
+    if world_size > 1:
+        training_step = DistributedDataParallel(
+            training_step,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=config["train"].get(
+                "find_unused_parameters", True
+            ),
+        )
     nonfinite_guard = config["train"].get("nonfinite_guard", True)
     parameter_check_every = config["train"].get(
         "nonfinite_parameter_check_every", 100
@@ -443,7 +622,7 @@ def train(config):
     try:
         for epoch in range(start_epoch, config["train"]["epochs"]):
             epoch_started = time.time()
-            model.train()
+            training_step.train()
             if hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)
             if rank == 0:
@@ -454,7 +633,7 @@ def train(config):
                 step_started = time.time()
                 images = images.to(device, non_blocking=True); optimizer.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
-                    losses = criterion(model(images), targets)
+                    losses = training_step(images, targets)
                 if nonfinite_guard:
                     loss_tensors = list(losses.items())
                     local_finite = _named_tensors_are_finite(loss_tensors)
@@ -537,22 +716,32 @@ def train(config):
                 if scaler.get_scale() >= previous_scale:
                     scheduler.step()
                 if (
-                    rank == 0
-                    and recovery_every > 0
+                    recovery_every > 0
                     and current_global_step - last_recovery_global_step >= recovery_every
                 ):
                     recovery_path = output_dir / "checkpoints" / "recovery.pth"
-                    save_checkpoint(
+                    _save_training_checkpoint(
                         recovery_path, model, optimizer, scheduler, scaler,
-                        epoch, best, config, step_in_epoch=step,
+                        epoch, best, config, device, world_size,
+                        len(train_loader), step_in_epoch=step,
                     )
-                    logger.info(
-                        "Recovery checkpoint | epoch=%d | step=%d/%d | path=%s",
-                        epoch + 1, step + 1, len(train_loader), recovery_path,
-                    )
+                    if rank == 0:
+                        logger.info(
+                            "Recovery checkpoint | epoch=%d | step=%d/%d | path=%s",
+                            epoch + 1, step + 1, len(train_loader), recovery_path,
+                        )
                     last_recovery_global_step = current_global_step
-                if rank == 0 and (step % config["runtime"]["log_every"] == 0 or step + 1 == len(train_loader)):
-                    loss_text = " ".join("%s=%.5f" % (key, value.item()) for key, value in losses.items())
+                should_log = (
+                    step % config["runtime"]["log_every"] == 0
+                    or step + 1 == len(train_loader)
+                )
+                if should_log:
+                    logged_losses = distributed_utils.mean_tensor_dict(losses)
+                if rank == 0 and should_log:
+                    loss_text = " ".join(
+                        "%s=%.5f" % (key, value.item())
+                        for key, value in logged_losses.items()
+                    )
                     gpu_memory = ""
                     if device.type == "cuda":
                         gpu_memory = " gpu_mem=%.2fGB" % (torch.cuda.max_memory_allocated(device) / (1024 ** 3))
@@ -584,23 +773,47 @@ def train(config):
                 validation_started = time.time()
                 if rank == 0: logger.info("Validation started | epoch=%d", epoch + 1)
                 metrics = evaluate(model, val_loader, config, device)
+                is_new_best = False
                 if rank == 0:
-                    logger.info("Validation finished | seconds=%.2f | metrics=%s", time.time() - validation_started, json.dumps(metrics, ensure_ascii=False))
+                    summary_keys = (
+                        "NDS", "mAP", "mATE", "mASE", "mAOE", "mADE",
+                        "mRecall", "mPrecision", "F1", "num_samples",
+                        "num_gt", "num_predictions", "num_tp",
+                    )
+                    metric_summary = {
+                        key: metrics[key] for key in summary_keys if key in metrics
+                    }
+                    logger.info(
+                        "Validation finished | seconds=%.2f | metrics=%s",
+                        time.time() - validation_started,
+                        json.dumps(metric_summary, ensure_ascii=False),
+                    )
                     if metrics["NDS"] > best:
                         best = metrics["NDS"]
-                        best_path = output_dir / "checkpoints" / "best.pth"
-                        save_checkpoint(best_path, model, optimizer, scheduler, scaler, epoch, best, config)
-                        logger.info("New best checkpoint | NDS=%.6f | path=%s", best, best_path)
+                        is_new_best = True
                     metrics_dir = output_dir / "metrics"; metrics_dir.mkdir(exist_ok=True)
                     with (metrics_dir / "val.json").open("w", encoding="utf-8") as handle: json.dump(metrics, handle, ensure_ascii=False, indent=2)
+                best = distributed_utils.broadcast_object_from_main(best)
+                is_new_best = distributed_utils.broadcast_object_from_main(is_new_best)
+                if is_new_best:
+                    best_path = output_dir / "checkpoints" / "best.pth"
+                    _save_training_checkpoint(
+                        best_path, model, optimizer, scheduler, scaler,
+                        epoch, best, config, device, world_size, len(train_loader),
+                    )
+                    if rank == 0:
+                        logger.info("New best checkpoint | NDS=%.6f | path=%s", best, best_path)
+            last_path = output_dir / "checkpoints" / "last.pth"
+            _save_training_checkpoint(
+                last_path, model, optimizer, scheduler, scaler,
+                epoch, best, config, device, world_size, len(train_loader),
+            )
             if rank == 0:
-                last_path = output_dir / "checkpoints" / "last.pth"
-                save_checkpoint(last_path, model, optimizer, scheduler, scaler, epoch, best, config)
                 logger.info("Epoch %d finished | seconds=%.2f | last_checkpoint=%s", epoch + 1, time.time() - epoch_started, last_path)
         if rank == 0:
             logger.info("Training completed | seconds=%.2f | best_NDS=%.6f", time.time() - training_started, best)
     finally:
-        if distributed.is_initialized(): distributed.destroy_process_group()
+        distributed_utils.destroy()
         if native_crash_handle is not None:
             faulthandler.disable()
             native_crash_handle.close()

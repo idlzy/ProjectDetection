@@ -59,10 +59,14 @@ def validate_config(config: Dict[str, Any]) -> None:
     backbone = config["model"].get(
         "backbone", "efficientnet_b0_hat_compatible"
     )
-    if backbone not in ("efficientnet_b0_hat_compatible", "resnet101_fcos3d"):
+    if backbone not in (
+        "efficientnet_b0_hat_compatible",
+        "legacy_hat_efficientnet_b0",
+        "resnet101_fcos3d",
+    ):
         raise ValueError("Unknown model.backbone: %s" % backbone)
     neck = config["model"].get("neck", "bifpn")
-    if neck not in ("bifpn", "fpn"):
+    if neck not in ("bifpn", "legacy_hat_bifpn", "fpn"):
         raise ValueError("Unknown model.neck: %s" % neck)
     dcn_stages = config["model"].get("backbone_dcn_stages")
     if dcn_stages is not None and len(dcn_stages) != 4:
@@ -70,11 +74,46 @@ def validate_config(config: Dict[str, Any]) -> None:
     head_norm = config["model"].get("head_norm", "batch")
     if head_norm not in ("batch", "group", "none"):
         raise ValueError("model.head_norm must be batch, group or none")
-    nms_backend = config["evaluation"].get("nms_backend", "auto")
-    if nms_backend not in ("auto", "horizon", "cuda", "reference"):
+    nms_chunk_size = config["evaluation"].get("nms_pairwise_chunk_size", 32)
+    if not isinstance(nms_chunk_size, int) or isinstance(nms_chunk_size, bool) or nms_chunk_size < 1:
+        raise ValueError("evaluation.nms_pairwise_chunk_size must be a positive integer")
+    sharing_strategy = config["data"].get("multiprocessing_sharing_strategy")
+    if sharing_strategy not in (None, "file_descriptor", "file_system"):
         raise ValueError(
-            "evaluation.nms_backend must be auto, horizon, cuda or reference"
+            "data.multiprocessing_sharing_strategy must be file_descriptor or file_system"
         )
+    min_recall = config["evaluation"].get("min_recall", 0.1)
+    if not 0.0 <= min_recall <= 1.0:
+        raise ValueError("evaluation.min_recall must be in [0, 1]")
+    min_precision = config["evaluation"].get("min_precision", 0.1)
+    if not 0.0 <= min_precision < 1.0:
+        raise ValueError("evaluation.min_precision must be in [0, 1)")
+    tp_distance = config["evaluation"].get("tp_distance_threshold", 2.0)
+    if tp_distance not in config["evaluation"]["distance_thresholds"]:
+        raise ValueError(
+            "evaluation.tp_distance_threshold must be one of distance_thresholds"
+        )
+    if config["evaluation"].get("mean_ap_weight", 5) <= 0:
+        raise ValueError("evaluation.mean_ap_weight must be greater than 0")
+    evaluated_classes = config["evaluation"].get("classes")
+    if evaluated_classes is not None:
+        if not isinstance(evaluated_classes, list) or not evaluated_classes:
+            raise ValueError("evaluation.classes must be null or a non-empty list")
+        if len(evaluated_classes) != len(set(evaluated_classes)):
+            raise ValueError("evaluation.classes must not contain duplicates")
+        unknown_classes = set(evaluated_classes) - set(config["data"]["classes"])
+        if unknown_classes:
+            raise ValueError(
+                "Unknown evaluation.classes: %s" % ", ".join(sorted(unknown_classes))
+            )
+    depth_bins = config["evaluation"].get("depth_bins", ())
+    if not depth_bins or any(
+        not isinstance(interval, (list, tuple))
+        or len(interval) != 2
+        or interval[0] >= interval[1]
+        for interval in depth_bins
+    ):
+        raise ValueError("evaluation.depth_bins must contain increasing [min, max] pairs")
     if config["train"].get("validate_every", 1) < 1:
         raise ValueError("train.validate_every must be at least 1")
     if not isinstance(config["train"].get("nonfinite_guard", True), bool):
@@ -89,8 +128,41 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("train.amp_initial_scale must be greater than 0")
     if config["train"].get("recovery_checkpoint_every_steps", 100) < 0:
         raise ValueError("train.recovery_checkpoint_every_steps must be non-negative")
+    if not isinstance(
+        config["train"].get("allow_world_size_change_on_resume", False), bool
+    ):
+        raise ValueError(
+            "train.allow_world_size_change_on_resume must be true or false"
+        )
+    if not isinstance(config["train"].get("find_unused_parameters", True), bool):
+        raise ValueError("train.find_unused_parameters must be true or false")
+    assignment_chunk_size = config["train"].get(
+        "target_assignment_chunk_size", 8
+    )
+    if (
+        not isinstance(assignment_chunk_size, int)
+        or isinstance(assignment_chunk_size, bool)
+        or assignment_chunk_size < 1
+    ):
+        raise ValueError(
+            "train.target_assignment_chunk_size must be a positive integer"
+        )
     if config["runtime"].get("log_every", 1) < 1:
         raise ValueError("runtime.log_every must be at least 1")
+    distributed_backend = config["runtime"].get("distributed_backend", "nccl")
+    if distributed_backend != "nccl":
+        raise ValueError("runtime.distributed_backend must be nccl")
+    distributed_timeout = config["runtime"].get(
+        "distributed_timeout_seconds", 600
+    )
+    if (
+        not isinstance(distributed_timeout, int)
+        or isinstance(distributed_timeout, bool)
+        or distributed_timeout < 1
+    ):
+        raise ValueError(
+            "runtime.distributed_timeout_seconds must be a positive integer"
+        )
     geometry = config["model"].get("geometry", {})
     if geometry.get("enabled", False):
         if not config["model"].get("geometric_depth", False):

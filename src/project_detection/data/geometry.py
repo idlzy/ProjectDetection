@@ -23,7 +23,49 @@ def rot_z(angle: float) -> np.ndarray:
     return np.asarray([[c, -s, 0], [s, c, 0], [0, 0, 1]], dtype=np.float64)
 
 
-def load_front_left_calibration(path: Path, image_hw: Tuple[int, int]) -> Dict[str, np.ndarray]:
+def load_vehicle_to_camera_extrinsic(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    """Read HAT's per-frame vehicle-to-camera extrinsic text format.
+
+    The file contains three rotation rows followed by one translation row;
+    comments and empty lines are ignored.  Dataset targets use camera-to-
+    vehicle transforms internally, so callers invert this transform.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError("Missing per-frame extrinsic: %s" % path)
+    rows = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            try:
+                row = [float(value) for value in stripped.split()]
+            except ValueError as error:
+                raise ValueError(
+                    "Invalid numeric value in %s:%d" % (path, line_number)
+                ) from error
+            if len(row) != 3:
+                raise ValueError(
+                    "Expected 3 values in %s:%d, got %d"
+                    % (path, line_number, len(row))
+                )
+            rows.append(row)
+    if len(rows) != 4:
+        raise ValueError(
+            "Expected 4 numeric rows in %s, got %d" % (path, len(rows))
+        )
+    values = np.asarray(rows, dtype=np.float64)
+    if not np.isfinite(values).all():
+        raise ValueError("Non-finite value in per-frame extrinsic: %s" % path)
+    return values[:3], values[3]
+
+
+def load_front_left_calibration(
+    path: Path,
+    image_hw: Tuple[int, int],
+    extrinsic_path: Optional[Path] = None,
+) -> Dict[str, np.ndarray]:
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
     param = next(
@@ -47,9 +89,16 @@ def load_front_left_calibration(path: Path, image_hw: Tuple[int, int]) -> Dict[s
     d = intr.get("distortion_coefficients", {})
     dist = np.asarray([d.get("k1", 0), d.get("k2", 0), d.get("p1", 0), d.get("p2", 0),
                        d.get("k3", 0), d.get("k4", 0), d.get("k5", 0), d.get("k6", 0)], dtype=np.float64)
-    ext = param["extrinsics"]
-    r_c2v = rot_z(float(ext.get("yaw", 0))) @ rot_y(float(ext.get("pitch", 0))) @ rot_x(float(ext.get("roll", 0)))
-    t_c2v = np.asarray([ext.get("x", 0), ext.get("y", 0), ext.get("z", 0)], dtype=np.float64)
+    if extrinsic_path is not None:
+        # Match HAT: a declared per-frame file stores vehicle -> camera and
+        # takes precedence over the batch-level transform embedded in JSON.
+        r_v2c, t_v2c = load_vehicle_to_camera_extrinsic(extrinsic_path)
+        r_c2v = r_v2c.T
+        t_c2v = -r_c2v @ t_v2c
+    else:
+        ext = param["extrinsics"]
+        r_c2v = rot_z(float(ext.get("yaw", 0))) @ rot_y(float(ext.get("pitch", 0))) @ rot_x(float(ext.get("roll", 0)))
+        t_c2v = np.asarray([ext.get("x", 0), ext.get("y", 0), ext.get("z", 0)], dtype=np.float64)
     return {"k": k, "dist": dist, "r_c2v": r_c2v, "t_c2v": t_c2v}
 
 

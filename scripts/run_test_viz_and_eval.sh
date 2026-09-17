@@ -16,7 +16,7 @@ resolve_python() {
     fi
     for candidate in "${candidates[@]}"; do
         if [[ -n "${candidate}" && -x "${candidate}" ]] && \
-           "${candidate}" -c 'import cv2, torch, yaml' >/dev/null 2>&1; then
+           "${candidate}" -c 'import cv2, matplotlib, torch, yaml' >/dev/null 2>&1; then
             printf '%s\n' "${candidate}"
             return 0
         fi
@@ -25,7 +25,7 @@ resolve_python() {
 }
 
 if ! PYTHON_BIN="$(resolve_python)"; then
-    echo "[mw3d-test] ERROR: no Python with PyTorch, OpenCV and PyYAML found" >&2
+    echo "[mw3d-test] ERROR: no Python with PyTorch, OpenCV, Matplotlib and PyYAML found" >&2
     echo "[mw3d-test] Activate the ai environment or set TEST_PYTHON" >&2
     exit 1
 fi
@@ -35,7 +35,9 @@ CHECKPOINT="${CHECKPOINT:-}"
 DEVICE_ID="${DEVICE_ID:-0}"
 VIZ_SCORE_THR="${VIZ_SCORE_THR:-0.35}"
 EVAL_SCORE_THR="${EVAL_SCORE_THR:-0.05}"
-NMS_BACKEND="${NMS_BACKEND:-auto}"
+EVAL_CLASSES="${EVAL_CLASSES:-}"
+DATA_ROOT="${DATA_ROOT:-}"
+READY_ROOT="${READY_ROOT:-${DATA_ROOT}}"
 VIZ_MAX_IMAGES="${VIZ_MAX_IMAGES:-}"
 VIZ_START_INDEX="${VIZ_START_INDEX:-0}"
 MAX_DETECTIONS="${MAX_DETECTIONS:-30}"
@@ -63,10 +65,12 @@ echo "[mw3d-test] config=${CONFIG}"
 echo "[mw3d-test] checkpoint=${CHECKPOINT}"
 echo "[mw3d-test] python=${PYTHON_BIN}"
 echo "[mw3d-test] device=${DEVICE_ID}"
-echo "[mw3d-test] nms_backend=${NMS_BACKEND}"
 echo "[mw3d-test] visualizations=${VIZ_DIR}"
 echo "[mw3d-test] metric_json=${METRIC_JSON}"
 echo "[mw3d-test] plots=${PLOT_DIR}"
+if [[ -n "${EVAL_CLASSES}" ]]; then
+    echo "[mw3d-test] evaluated classes=${EVAL_CLASSES}"
+fi
 
 if [[ "${SKIP_VIZ:-0}" != "1" ]]; then
     viz_args=(
@@ -80,9 +84,17 @@ if [[ "${SKIP_VIZ:-0}" != "1" ]]; then
         --skip-summary-json
         --set "evaluation.nms_pre=50"
               "evaluation.max_per_image=${MAX_DETECTIONS}"
-              "evaluation.nms_backend=${NMS_BACKEND}"
               "evaluation.score_threshold=${VIZ_SCORE_THR}"
     )
+    if [[ -n "${DATA_ROOT}" ]]; then
+        viz_args+=("data.data_root=${DATA_ROOT}")
+    fi
+    if [[ -n "${READY_ROOT}" ]]; then
+        viz_args+=("data.ready_root=${READY_ROOT}")
+    fi
+    if [[ -n "${EVAL_CLASSES}" ]]; then
+        viz_args+=(--set "evaluation.classes=${EVAL_CLASSES}")
+    fi
     if [[ -n "${VIZ_MAX_IMAGES}" ]]; then
         viz_args+=(--max-images "${VIZ_MAX_IMAGES}")
     fi
@@ -107,11 +119,19 @@ if [[ "${SKIP_EVAL:-0}" != "1" ]]; then
         --output "${METRIC_JSON}"
         --plot-dir "${PLOT_DIR}"
         --set "evaluation.score_threshold=${EVAL_SCORE_THR}"
-        --set "evaluation.nms_backend=${NMS_BACKEND}"
     )
+    if [[ -n "${DATA_ROOT}" ]]; then
+        eval_args+=(--set "data.data_root=${DATA_ROOT}")
+    fi
+    if [[ -n "${READY_ROOT}" ]]; then
+        eval_args+=(--set "data.ready_root=${READY_ROOT}")
+    fi
     if [[ -n "${EVAL_MAX_SAMPLES:-}" ]]; then
         eval_args+=(--set "runtime.max_test_samples=${EVAL_MAX_SAMPLES}")
         echo "[mw3d-test] WARNING: evaluation limited to ${EVAL_MAX_SAMPLES} samples"
+    fi
+    if [[ -n "${EVAL_CLASSES}" ]]; then
+        eval_args+=(--set "evaluation.classes=${EVAL_CLASSES}")
     fi
     CUDA_VISIBLE_DEVICES="${DEVICE_ID}" "${PYTHON_BIN}" tools/test.py "${eval_args[@]}"
 else

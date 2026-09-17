@@ -1,19 +1,10 @@
 from __future__ import annotations
 
-import math
-
-import numpy as np
 import torch
 
 from ..ops import nms_rotated as _project_cuda_nms_rotated
 from .depth_propagation import propagate_geometric_depth, undistort_points
 from .targets import feature_points
-
-try:
-    from horizon_plugin_pytorch.functional import nms_rotated as _horizon_nms_rotated
-except ImportError:
-    _horizon_nms_rotated = None
-
 
 def axis_aligned_nms(boxes, scores, threshold):
     if boxes.numel() == 0:
@@ -33,108 +24,30 @@ def axis_aligned_nms(boxes, scores, threshold):
     return torch.stack(keep)
 
 
-def _rectangle_corners(box):
-    x, z, length, width, yaw = box
-    local = np.asarray([[-length/2, -width/2], [length/2, -width/2],
-                        [length/2, width/2], [-length/2, width/2]], dtype=np.float64)
-    c, s = math.cos(yaw), math.sin(yaw)
-    return local @ np.asarray([[c, -s], [s, c]]).T + np.asarray([x, z])
-
-
-def _polygon_area(polygon):
-    if len(polygon) < 3:
-        return 0.0
-    polygon = np.asarray(polygon)
-    return abs(float(np.dot(polygon[:, 0], np.roll(polygon[:, 1], -1)) -
-                     np.dot(polygon[:, 1], np.roll(polygon[:, 0], -1)))) / 2
-
-
-def _polygon_clip(subject, clip):
-    output = [point for point in subject]
-    orientation = np.sign(np.cross(clip[1]-clip[0], clip[2]-clip[1])) or 1.0
-    for index in range(len(clip)):
-        edge_a, edge_b = clip[index], clip[(index+1) % len(clip)]
-        input_points, output = output, []
-        if not input_points:
-            break
-        def inside(point):
-            return orientation * np.cross(edge_b-edge_a, point-edge_a) >= -1e-9
-        def intersection(start, end):
-            segment, edge = end-start, edge_b-edge_a
-            denominator = np.cross(segment, edge)
-            if abs(denominator) < 1e-12:
-                return end
-            return start + segment * (np.cross(edge_a-start, edge) / denominator)
-        previous = input_points[-1]
-        for current in input_points:
-            if inside(current):
-                if not inside(previous):
-                    output.append(intersection(previous, current))
-                output.append(current)
-            elif inside(previous):
-                output.append(intersection(previous, current))
-            previous = current
-    return output
-
-
-def _reference_rotated_bev_nms(boxes3d, scores, threshold):
-    """Portable exact-polygon reference implementation."""
-    device = boxes3d.device
-    compact = boxes3d[:, [0, 2, 3, 5, 6]].detach().cpu().double().numpy()
-    order = scores.detach().cpu().numpy().argsort()[::-1]
-    polygons = [_rectangle_corners(box) for box in compact]
-    areas = np.asarray([max(_polygon_area(poly), 1e-9) for poly in polygons])
-    keep = []
-    while len(order):
-        current = int(order[0]); keep.append(current); remaining = []
-        for other in order[1:]:
-            other = int(other)
-            intersection = _polygon_area(_polygon_clip(polygons[current], polygons[other]))
-            iou = intersection / max(areas[current] + areas[other] - intersection, 1e-9)
-            if iou <= threshold:
-                remaining.append(other)
-        order = np.asarray(remaining, dtype=np.int64)
-    return torch.as_tensor(keep, dtype=torch.long, device=device)
-
-
-def rotated_bev_nms(boxes3d, scores, threshold, backend="auto"):
-    """Run rotated BEV NMS using Horizon CUDA when available.
+def rotated_bev_nms(
+    boxes3d,
+    scores,
+    threshold,
+    pairwise_chunk_size=32,
+):
+    """Run rotated BEV NMS using the project's CUDA implementation.
 
     Args:
         boxes3d: Camera boxes in ``[x,y,z,l,h,w,yaw,vx,vz]`` order.
         scores: Ranking score for each box.
         threshold: Rotated IoU suppression threshold.
-        backend: ``auto``, ``horizon``, ``cuda`` or ``reference``.
     """
-    use_horizon = backend == "horizon" or (
-        backend == "auto" and boxes3d.is_cuda and _horizon_nms_rotated is not None
+    if not boxes3d.is_cuda or not scores.is_cuda:
+        raise RuntimeError("rotated BEV NMS requires CUDA tensors")
+    boxes_xywhr = boxes3d[:, [0, 2, 3, 5, 6]].contiguous()
+    _, keep = _project_cuda_nms_rotated(
+        boxes_xywhr,
+        scores.contiguous(),
+        threshold,
+        clockwise=True,
+        pairwise_chunk_size=pairwise_chunk_size,
     )
-    if use_horizon:
-        if _horizon_nms_rotated is None:
-            raise RuntimeError("Horizon NMS requested but horizon_plugin_pytorch is unavailable")
-        if not boxes3d.is_cuda:
-            raise RuntimeError("Horizon rotated NMS requires CUDA tensors")
-        # Horizon expects [x_center, y_center, width, height, angle] and returns
-        # indices into the original, unsorted input. Camera BEV uses x/z and l/w.
-        boxes_xywhr = boxes3d[:, [0, 2, 3, 5, 6]].contiguous()
-        _, keep = _horizon_nms_rotated(
-            boxes_xywhr, scores.contiguous(), threshold, clockwise=True
-        )
-        return keep.long()
-    use_project_cuda = backend == "cuda" or (
-        backend == "auto" and boxes3d.is_cuda
-    )
-    if use_project_cuda:
-        if not boxes3d.is_cuda:
-            raise RuntimeError("Project rotated CUDA NMS requires CUDA tensors")
-        boxes_xywhr = boxes3d[:, [0, 2, 3, 5, 6]].contiguous()
-        _, keep = _project_cuda_nms_rotated(
-            boxes_xywhr, scores.contiguous(), threshold, clockwise=True
-        )
-        return keep.long()
-    if backend not in ("auto", "reference", "cuda"):
-        raise ValueError("Unknown NMS backend: %s" % backend)
-    return _reference_rotated_bev_nms(boxes3d, scores, threshold)
+    return keep.long()
 
 
 class FCOS3DPostProcessor:
@@ -147,8 +60,18 @@ class FCOS3DPostProcessor:
         self.score_threshold = evaluation["score_threshold"]
         self.nms_pre = evaluation["nms_pre"]
         self.nms_threshold = evaluation["nms_threshold"]
-        self.nms_backend = evaluation.get("nms_backend", "auto")
+        self.nms_pairwise_chunk_size = evaluation.get(
+            "nms_pairwise_chunk_size", 32
+        )
         self.max_per_image = evaluation["max_per_image"]
+        evaluated_names = evaluation.get("classes")
+        if evaluated_names is None:
+            evaluated_names = config["data"]["classes"]
+        evaluated_names = set(evaluated_names)
+        self.evaluation_class_ids = {
+            index for index, name in enumerate(config["data"]["classes"])
+            if name in evaluated_names
+        }
         self.geometry = config["model"].get("geometry", {})
         enabled_names = set(self.geometry.get("classes", config["data"]["classes"]))
         self.geometry_class_ids = {
@@ -158,6 +81,8 @@ class FCOS3DPostProcessor:
 
     @torch.no_grad()
     def __call__(self, outputs, targets):
+        if getattr(self.model.head, "legacy_hat_postprocess", False):
+            return self._legacy_hat(outputs, targets)
         results = []
         for image_index in range(outputs[0]["cls"].shape[0]):
             raws, local_depths, depth_confidences = [], [], []
@@ -166,6 +91,10 @@ class FCOS3DPostProcessor:
                 cls = prediction["cls"][image_index].sigmoid()
                 center = prediction["centerness"][image_index].sigmoid()
                 combined = torch.sqrt(cls * center)
+                if len(self.evaluation_class_ids) != cls.shape[0]:
+                    enabled = torch.zeros(cls.shape[0], dtype=torch.bool, device=cls.device)
+                    enabled[list(self.evaluation_class_ids)] = True
+                    combined = combined.masked_fill(~enabled[:, None, None], -1.0)
                 flat_scores, flat_indices = combined.flatten().topk(min(self.nms_pre, combined.numel()))
                 keep = flat_scores >= self.score_threshold
                 flat_scores, flat_indices = flat_scores[keep], flat_indices[keep]
@@ -260,7 +189,7 @@ class FCOS3DPostProcessor:
                 indices = torch.where(labels == label)[0]
                 kept.append(indices[rotated_bev_nms(
                     boxes3d[indices], scores[indices], self.nms_threshold,
-                    backend=self.nms_backend,
+                    pairwise_chunk_size=self.nms_pairwise_chunk_size,
                 )])
             kept = torch.cat(kept); kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
             result = {"boxes3d": boxes3d[kept], "scores": scores[kept], "labels": labels[kept], "boxes2d": image_boxes[kept]}
@@ -272,4 +201,167 @@ class FCOS3DPostProcessor:
                     "geometry_valid": geometry_valid[kept],
                 })
             results.append(result)
+        return results
+
+    @torch.no_grad()
+    def _legacy_hat(self, outputs, targets):
+        """Decode legacy HAT predictions using their original conventions.
+
+        HAT regressed ``point - center`` (the current trainer uses the opposite
+        sign), thresholded ``class * centerness`` and used probabilistic depth
+        confidence only for candidate ranking.  Direction bins also have to be
+        folded into local yaw before adding the camera-ray angle.
+        """
+        results = []
+        for image_index in range(outputs[0]["cls"].shape[0]):
+            boxes_by_level = []
+            image_boxes_by_level = []
+            class_scores_by_level = []
+            rank_scores_by_level = []
+            for prediction, stride in zip(outputs, self.strides):
+                cls = prediction["cls"][image_index].sigmoid()
+                centerness = prediction["centerness"][image_index].sigmoid()
+                height, width = cls.shape[-2:]
+                raw = prediction["bbox"][image_index].permute(1, 2, 0).reshape(-1, 9)
+                cls_scores = cls.permute(1, 2, 0).reshape(-1, cls.shape[0])
+                center_scores = centerness.reshape(-1)
+                direction = (
+                    prediction["direction"][image_index]
+                    .permute(1, 2, 0)
+                    .reshape(-1, 2)
+                    .argmax(dim=1)
+                )
+                depth_logits = prediction.get("depth_logits")
+                if depth_logits is not None:
+                    depth_logits = (
+                        depth_logits[image_index]
+                        .permute(1, 2, 0)
+                        .reshape(-1, depth_logits.shape[1])
+                    )
+                depth, depth_confidence = self.model.head.decode_depth_candidates(
+                    raw[:, 2], depth_logits
+                )
+                evaluated_ids = sorted(self.evaluation_class_ids)
+                location_rank = (
+                    cls_scores[:, evaluated_ids]
+                    * center_scores[:, None]
+                    * depth_confidence[:, None]
+                ).max(dim=1).values
+                if self.nms_pre > 0 and location_rank.numel() > self.nms_pre:
+                    selected = location_rank.topk(self.nms_pre).indices
+                    raw = raw[selected]
+                    cls_scores = cls_scores[selected]
+                    center_scores = center_scores[selected]
+                    direction = direction[selected]
+                    depth = depth[selected]
+                    depth_confidence = depth_confidence[selected]
+                else:
+                    selected = None
+
+                points = feature_points(height, width, stride, raw.device)
+                if selected is not None:
+                    points = points[selected]
+                centers2d = points - raw[:, :2] * float(stride)
+                target_meta = targets[image_index]
+                camera = target_meta["camera_matrix"].to(raw.device)
+                distortion = target_meta.get("distortion")
+                if distortion is not None:
+                    distortion = distortion.to(raw.device)
+                normalized_x, normalized_y = undistort_points(
+                    centers2d, camera, distortion
+                )
+                x = normalized_x * depth
+                y = normalized_y * depth
+                dimensions = raw[:, 3:6].exp()
+                local_yaw = (
+                    torch.remainder(raw[:, 6] - 0.7854, math.pi)
+                    + 0.7854
+                    + math.pi * direction.to(raw.dtype)
+                )
+                yaw = local_yaw + torch.atan2(normalized_x, torch.ones_like(normalized_x))
+                boxes = torch.cat(
+                    [
+                        x[:, None], y[:, None], depth[:, None], dimensions,
+                        yaw[:, None], raw[:, 7:9],
+                    ],
+                    dim=1,
+                )
+                half_width = (
+                    camera[0, 0] * dimensions[:, 2] / depth.clamp_min(1e-3)
+                ) / 2
+                half_height = (
+                    camera[1, 1] * dimensions[:, 1] / depth.clamp_min(1e-3)
+                ) / 2
+                image_boxes = torch.stack(
+                    [
+                        centers2d[:, 0] - half_width,
+                        centers2d[:, 1] - half_height,
+                        centers2d[:, 0] + half_width,
+                        centers2d[:, 1] + half_height,
+                    ],
+                    dim=1,
+                )
+                detection_scores = cls_scores * center_scores[:, None]
+                ranking_scores = detection_scores * depth_confidence[:, None]
+                boxes_by_level.append(boxes)
+                image_boxes_by_level.append(image_boxes)
+                class_scores_by_level.append(detection_scores)
+                rank_scores_by_level.append(ranking_scores)
+
+            all_boxes = torch.cat(boxes_by_level)
+            all_image_boxes = torch.cat(image_boxes_by_level)
+            all_scores = torch.cat(class_scores_by_level)
+            all_rank_scores = torch.cat(rank_scores_by_level)
+            kept_boxes, kept_image_boxes = [], []
+            kept_scores, kept_labels, kept_rank = [], [], []
+            for label in sorted(self.evaluation_class_ids):
+                valid = all_scores[:, label] >= self.score_threshold
+                if not valid.any():
+                    continue
+                label_boxes = all_boxes[valid]
+                label_image_boxes = all_image_boxes[valid]
+                label_scores = all_scores[valid, label]
+                label_rank = all_rank_scores[valid, label]
+                keep = rotated_bev_nms(
+                    label_boxes,
+                    label_rank,
+                    self.nms_threshold,
+                    pairwise_chunk_size=self.nms_pairwise_chunk_size,
+                )
+                kept_boxes.append(label_boxes[keep])
+                kept_image_boxes.append(label_image_boxes[keep])
+                kept_scores.append(label_scores[keep])
+                kept_rank.append(label_rank[keep])
+                kept_labels.append(
+                    torch.full(
+                        (keep.numel(),), label, dtype=torch.long,
+                        device=all_boxes.device,
+                    )
+                )
+            if not kept_boxes:
+                results.append(
+                    {
+                        "boxes3d": all_boxes.new_empty((0, 9)),
+                        "scores": all_boxes.new_empty((0,)),
+                        "labels": torch.empty(
+                            0, dtype=torch.long, device=all_boxes.device
+                        ),
+                        "boxes2d": all_boxes.new_empty((0, 4)),
+                    }
+                )
+                continue
+            boxes = torch.cat(kept_boxes)
+            image_boxes = torch.cat(kept_image_boxes)
+            scores = torch.cat(kept_scores)
+            labels = torch.cat(kept_labels)
+            ranking = torch.cat(kept_rank)
+            order = ranking.argsort(descending=True)[: self.max_per_image]
+            results.append(
+                {
+                    "boxes3d": boxes[order],
+                    "scores": scores[order],
+                    "labels": labels[order],
+                    "boxes2d": image_boxes[order],
+                }
+            )
         return results

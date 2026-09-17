@@ -22,14 +22,24 @@ class Mw3dReadyDataset(Dataset):
         # Local datasets may keep frames.jsonl, splits/, images/ and annotation/
         # under one root. The separate ready_root remains supported for the
         # existing remote dataset layout.
+        
+        # 一般是数据集索引目录
         self.ready_root = Path(ready_root) if ready_root else self.data_root
+        # 确定数据集划分类别，比如train/val/test
         self.split = split
+        # 确定数据集类别
         self.classes = list(classes)
         self.class_to_id = {name: idx for idx, name in enumerate(classes)}
+
+        # 数据集设置统一尺寸
         self.image_size = tuple(image_size)
+
+        # 预处理参数        
         self.image_mean = tuple(image_mean)
         self.image_std = tuple(image_std)
         self.pad_value = tuple(pad_value)
+
+        # 数据集清单
         manifest = self.ready_root / "splits" / (split + "_frames.jsonl")
         if not manifest.is_file():
             raise FileNotFoundError("Missing split manifest: %s" % manifest)
@@ -46,23 +56,42 @@ class Mw3dReadyDataset(Dataset):
                 )
         if max_samples is not None:
             self.records = self.records[: int(max_samples)]
+        self.manifest_extrinsic_samples = sum(
+            bool(record.get("extrinsic_rel")) for record in self.records
+        )
+        self.calibration_json_samples = (
+            len(self.records) - self.manifest_extrinsic_samples
+        )
         self._calibration_cache: Dict[str, Dict[str, np.ndarray]] = {}
 
     def __len__(self) -> int:
         return len(self.records)
 
     def __getitem__(self, index: int):
+        # 通过索引取各项字段
         record = self.records[index]
         image_path = self.data_root / record["image_rel"]
         annotation_path = self.data_root / record["ann_rel"]
         calibration_path = self.data_root / record["calib_rel"]
+        extrinsic_rel = record.get("extrinsic_rel")
+        extrinsic_path = self.data_root / extrinsic_rel if extrinsic_rel else None
+
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if image is None:
             raise FileNotFoundError("Cannot read image: %s" % image_path)
         original_h, original_w = image.shape[:2]
-        cache_key = "%s:%dx%d" % (calibration_path, original_h, original_w)
+        cache_key = "%s:%s:%dx%d" % (
+            calibration_path,
+            extrinsic_path or "json-embedded-extrinsic",
+            original_h,
+            original_w,
+        )
         if cache_key not in self._calibration_cache:
-            self._calibration_cache[cache_key] = load_front_left_calibration(calibration_path, (original_h, original_w))
+            self._calibration_cache[cache_key] = load_front_left_calibration(
+                calibration_path,
+                (original_h, original_w),
+                extrinsic_path=extrinsic_path,
+            )
         calibration = self._calibration_cache[cache_key]
         with annotation_path.open("r", encoding="utf-8") as handle:
             objects = json.load(handle)
@@ -95,6 +124,10 @@ class Mw3dReadyDataset(Dataset):
         target["ann_batch"] = record.get("ann_batch", record.get("split_group", "unknown"))
         target["split_group"] = record.get("split_group", target["ann_batch"])
         target["image_path"] = str(image_path)
+        target["calibration_source"] = (
+            "extrinsic_rel" if extrinsic_path is not None else "calib_json"
+        )
+        target["extrinsic_path"] = str(extrinsic_path) if extrinsic_path else None
         target["scale_factor"] = float(scale)
         return tensor, target
 
