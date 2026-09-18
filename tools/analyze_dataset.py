@@ -56,9 +56,11 @@ SELECTED_ANN_BATCHES = (
     "D100-1725_re",
     "D103-1357_re",
     "D103-642_re",
-    # "KITTI",
+    "KITTI",
+    "ONCE_cam01",
+    "ONCE_cam03",
     # ONCE records in the current manifest do not contain ann_batch.
-    # MISSING_ANN_BATCH,
+    MISSING_ANN_BATCH,
 )
 
 DISTANCE_EDGES = np.asarray([0.0, 10.0, 20.0, 30.0, 50.0, 80.0, 120.0, np.inf])
@@ -344,10 +346,23 @@ def _describe(values):
     }
 
 
+def _percentage(count, total):
+    return round(float(count) / float(total) * 100.0, 6) if total else 0.0
+
+
+def _distribution_percentages(counts):
+    total = sum(counts.values())
+    return {
+        name: _percentage(count, total) for name, count in counts.items()
+    }
+
+
 def collect_statistics(data_root, selected_batches):
     selected_batch_order = list(dict.fromkeys(selected_batches))
     selected_batches = set(selected_batch_order)
     split_frames = Counter()
+    split_clips = Counter()
+    split_missing_clip_ids = Counter()
     split_boxes = Counter()
     class_by_split = defaultdict(Counter)
     subclass_by_split = defaultdict(Counter)
@@ -376,8 +391,20 @@ def collect_statistics(data_root, selected_batches):
 
     for split in SPLIT_NAMES:
         records = records_by_split[split]
-        split_frames[split] = sum(
-            _record_batch(record) in selected_batches for record in records
+        selected_records = [
+            record for record in records
+            if _record_batch(record) in selected_batches
+        ]
+        split_frames[split] = len(selected_records)
+        clip_ids = {
+            str(record["split_group"])
+            for record in selected_records
+            if record.get("split_group") not in (None, "")
+        }
+        split_clips[split] = len(clip_ids)
+        split_missing_clip_ids[split] = sum(
+            record.get("split_group") in (None, "")
+            for record in selected_records
         )
         for index, record in enumerate(records, 1):
             batch = _record_batch(record)
@@ -444,6 +471,14 @@ def collect_statistics(data_root, selected_batches):
     for class_name in class_names:
         counts, _ = np.histogram(arrays["bev_distance"][class_array == class_name], bins=DISTANCE_EDGES)
         distance_by_class[class_name] = dict(zip(DISTANCE_LABELS, map(int, counts)))
+    distance_percentage_by_split = {
+        split: _distribution_percentages(counts)
+        for split, counts in distance_by_split.items()
+    }
+    distance_percentage_by_class = {
+        class_name: _distribution_percentages(counts)
+        for class_name, counts in distance_by_class.items()
+    }
 
     geometry_summary = {
         name: _describe(array) for name, array in arrays.items()
@@ -462,7 +497,7 @@ def collect_statistics(data_root, selected_batches):
     }
 
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.now().astimezone().isoformat(),
         "data_root": str(data_root),
         "integrity": integrity,
@@ -474,19 +509,42 @@ def collect_statistics(data_root, selected_batches):
         },
         "selected_ann_batches": selected_batch_order,
         "splits": {
-            split: {"frames": split_frames[split], "bboxes": split_boxes[split]}
+            split: {
+                "frames": split_frames[split],
+                "clips": split_clips[split],
+                "missing_clip_ids": split_missing_clip_ids[split],
+                "bboxes": split_boxes[split],
+            }
             for split in SPLIT_NAMES
         },
         "totals": {
             "frames": sum(split_frames.values()),
+            "clips": sum(split_clips.values()),
+            "missing_clip_ids": sum(split_missing_clip_ids.values()),
             "bboxes": sum(split_boxes.values()),
             "geometry_valid_bboxes": len(split_array),
             "invalid_geometry": dict(invalid_geometry),
         },
         "class_bbox_counts": {
             name: {
-                **{split: class_by_split[name][split] for split in SPLIT_NAMES},
+                **{
+                    key: value
+                    for split in SPLIT_NAMES
+                    for key, value in (
+                        (split, class_by_split[name][split]),
+                        (
+                            "%s_percentage" % split,
+                            _percentage(
+                                class_by_split[name][split], split_boxes[split]
+                            ),
+                        ),
+                    )
+                },
                 "total": sum(class_by_split[name].values()),
+                "total_percentage": _percentage(
+                    sum(class_by_split[name].values()),
+                    sum(split_boxes.values()),
+                ),
             }
             for name in class_names
         },
@@ -518,7 +576,12 @@ def collect_statistics(data_root, selected_batches):
         "distance_bins": {
             "labels": list(DISTANCE_LABELS),
             "by_split": distance_by_split,
+            "by_split_percentages": distance_percentage_by_split,
             "by_class": distance_by_class,
+            "by_class_percentages": distance_percentage_by_class,
+            "percentage_denominator": (
+                "geometry-valid FrontLeft boxes in each split or class"
+            ),
         },
         "visibility": {
             "scope_notes": {
@@ -553,12 +616,14 @@ def _save(figure, path):
 
 def _plot_split_summary(report, path):
     frames = [report["splits"][split]["frames"] for split in SPLIT_NAMES]
+    clips = [report["splits"][split]["clips"] for split in SPLIT_NAMES]
     boxes = [report["splits"][split]["bboxes"] for split in SPLIT_NAMES]
     x = np.arange(len(SPLIT_NAMES))
-    figure, axes = plt.subplots(1, 2, figsize=(12, 4.8))
+    figure, axes = plt.subplots(1, 3, figsize=(16, 4.8))
     for axis, values, title, label in (
         (axes[0], frames, "各数据集帧数", "帧数"),
-        (axes[1], boxes, "各数据集左前相机3D框数量", "3D框数量"),
+        (axes[1], clips, "各数据集片段数", "Clip数量"),
+        (axes[2], boxes, "各数据集左前相机3D框数量", "3D框数量"),
     ):
         bars = axis.bar(x, values, color=[COLORS[name] for name in SPLIT_NAMES], width=0.62)
         axis.set_xticks(x, [SPLIT_DISPLAY_NAMES[name] for name in SPLIT_NAMES])
@@ -589,8 +654,15 @@ def _plot_class_counts(report, path):
     axis.set_title("各大类在数据集中的分布", loc="left", pad=14)
     axis.legend(loc="lower right")
     _decorate(axis, "x")
+    grand_total = max(float(left.sum()), 1.0)
     for y, total in enumerate(left):
-        axis.text(total, y, f"  {int(total):,}", va="center", fontsize=8)
+        axis.text(
+            total,
+            y,
+            "  %s (%.2f%%)" % (f"{int(total):,}", total / grand_total * 100),
+            va="center",
+            fontsize=8,
+        )
     _save(figure, path)
 
 
@@ -850,15 +922,35 @@ def _ann_batch_plot_label(batch):
 def _write_csv_files(report, output_dir):
     with (output_dir / "split_summary.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["split", "frames", "bboxes"])
+        writer.writerow(
+            ["split", "frames", "clips", "missing_clip_ids", "bboxes"]
+        )
         for split in SPLIT_NAMES:
             values = report["splits"][split]
-            writer.writerow([split, values["frames"], values["bboxes"]])
+            writer.writerow(
+                [
+                    split,
+                    values["frames"],
+                    values["clips"],
+                    values["missing_clip_ids"],
+                    values["bboxes"],
+                ]
+            )
     with (output_dir / "class_counts.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["class", *SPLIT_NAMES, "total"])
+        columns = ["class"]
+        for split in SPLIT_NAMES:
+            columns.extend([split, "%s_percentage" % split])
+        columns.extend(["total", "total_percentage"])
+        writer.writerow(columns)
         for name, values in report["class_bbox_counts"].items():
-            writer.writerow([name, *(values[split] for split in SPLIT_NAMES), values["total"]])
+            row = [name]
+            for split in SPLIT_NAMES:
+                row.extend(
+                    [values[split], values["%s_percentage" % split]]
+                )
+            row.extend([values["total"], values["total_percentage"]])
+            writer.writerow(row)
     with (output_dir / "subclass_counts.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(["class", "subclass", *SPLIT_NAMES, "total"])
@@ -881,13 +973,25 @@ def _write_csv_files(report, output_dir):
     with (output_dir / "distance_bins.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         labels = report["distance_bins"]["labels"]
-        writer.writerow(["scope", "name", *labels, "total"])
+        columns = ["scope", "name"]
+        for label in labels:
+            columns.extend([label, "%s_percentage" % label])
+        columns.append("total")
+        writer.writerow(columns)
         for split, values in report["distance_bins"]["by_split"].items():
-            counts = [values[label] for label in labels]
-            writer.writerow(["split", split, *counts, sum(counts)])
+            percentages = report["distance_bins"]["by_split_percentages"][split]
+            row = ["split", split]
+            for label in labels:
+                row.extend([values[label], percentages[label]])
+            writer.writerow([*row, sum(values.values())])
         for class_name, values in report["distance_bins"]["by_class"].items():
-            counts = [values[label] for label in labels]
-            writer.writerow(["class", class_name, *counts, sum(counts)])
+            percentages = report["distance_bins"]["by_class_percentages"][
+                class_name
+            ]
+            row = ["class", class_name]
+            for label in labels:
+                row.extend([values[label], percentages[label]])
+            writer.writerow([*row, sum(values.values())])
     with (output_dir / "split_integrity.csv").open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow(["split_pair", "key", "overlap_count", "examples"])
