@@ -5,6 +5,7 @@ import torch
 from ..ops import nms_rotated as _project_cuda_nms_rotated
 from .depth_propagation import propagate_geometric_depth, undistort_points
 from .targets import feature_points
+import math
 
 def axis_aligned_nms(boxes, scores, threshold):
     if boxes.numel() == 0:
