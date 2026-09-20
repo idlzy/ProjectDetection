@@ -63,6 +63,11 @@ def validate_config(config: Dict[str, Any]) -> None:
         "resnet101_fcos3d",
     ):
         raise ValueError("Unknown model.backbone: %s" % backbone)
+    attribute_chain = config["model"].get("attribute_chain", False)
+    if not isinstance(attribute_chain, bool):
+        raise ValueError("model.attribute_chain must be true or false")
+    if attribute_chain and backbone == "legacy_hat_efficientnet_b0":
+        raise ValueError("model.attribute_chain is not supported by Legacy HAT")
     neck = config["model"].get("neck", "bifpn")
     if neck not in ("bifpn", "legacy_hat_bifpn", "fpn"):
         raise ValueError("Unknown model.neck: %s" % neck)

@@ -107,8 +107,8 @@ class FCOS3DHead(nn.Module):
 
     Classification and regression towers share convolution weights across
     pyramid levels while keeping normalization statistics level-specific.
-    Regression groups independently predict image offset, depth, dimensions
-    and yaw using the current framework's target conventions.
+    Regression groups predict image offset, depth, dimensions and yaw using
+    the current framework's target conventions. Attribute chaining is optional.
     """
 
     def __init__(
@@ -125,11 +125,13 @@ class FCOS3DHead(nn.Module):
         normalization="batch",
         dcn_on_last_conv=False,
         deform_groups=1,
+        attribute_chain=False,
     ):
         super().__init__()
         self.num_classes = num_classes
         self.probabilistic_depth = probabilistic_depth
         self.geometric_depth = geometric_depth
+        self.attribute_chain = attribute_chain
         self.num_levels = 5
         self.group_reg_dims = (2, 1, 3, 1)
         self.register_buffer(
@@ -175,6 +177,14 @@ class FCOS3DHead(nn.Module):
                 for index in range(len(self.group_reg_dims))
             ]
         )
+        self.size_to_orientation = (
+            nn.Conv2d(feat_channels, feat_channels, 1, bias=False)
+            if attribute_chain else None
+        )
+        self.orientation_to_depth = (
+            nn.Conv2d(feat_channels, feat_channels, 1, bias=False)
+            if attribute_chain else None
+        )
         self.direction_branch = _MultiLevelTower(
             feat_channels, feat_channels, 1, **branch_options
         )
@@ -207,6 +217,9 @@ class FCOS3DHead(nn.Module):
             [nn.Parameter(torch.ones(1)) for _ in range(self.num_levels)]
         )
         self._init_weights()
+        if self.attribute_chain:
+            nn.init.zeros_(self.size_to_orientation.weight)
+            nn.init.zeros_(self.orientation_to_depth.weight)
 
     def _init_weights(self):
         for module in self.modules():
@@ -233,12 +246,23 @@ class FCOS3DHead(nn.Module):
             reg_feature = self.reg_tower(feature, level)
             cls_branch = self.cls_branch(cls_feature, level)
 
-            bbox_groups = []
-            regression_features = []
-            for branch, predictor in zip(self.reg_branches, self.conv_regs):
-                branch_feature = branch(reg_feature, level)
-                regression_features.append(branch_feature)
-                bbox_groups.append(predictor(branch_feature))
+            regression_features = [
+                branch(reg_feature, level) for branch in self.reg_branches
+            ]
+            direction_input = reg_feature
+            if self.attribute_chain:
+                size_delta = self.size_to_orientation(regression_features[2])
+                regression_features[3] = regression_features[3] + size_delta
+                regression_features[1] = regression_features[1] + (
+                    self.orientation_to_depth(regression_features[3])
+                )
+                direction_input = reg_feature + size_delta
+            bbox_groups = [
+                predictor(branch_feature)
+                for predictor, branch_feature in zip(
+                    self.conv_regs, regression_features
+                )
+            ]
             bbox = torch.cat(bbox_groups, dim=1) * self.scales[level]
             depth_feature = regression_features[1]
 
@@ -247,7 +271,7 @@ class FCOS3DHead(nn.Module):
                     "cls": self.conv_cls(cls_branch),
                     "bbox": bbox,
                     "direction": self.conv_dir(
-                        self.direction_branch(reg_feature, level)
+                        self.direction_branch(direction_input, level)
                     ),
                     "attribute": self.conv_attr(
                         self.attribute_branch(cls_feature, level)

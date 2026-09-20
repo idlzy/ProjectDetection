@@ -25,4 +25,5 @@ def build_model(config):
         head_norm=model.get("head_norm", "batch"),
         dcn_on_last_conv=model.get("dcn_on_last_conv", False),
         deform_groups=model.get("deform_groups", 1),
+        attribute_chain=model.get("attribute_chain", False),
     )
