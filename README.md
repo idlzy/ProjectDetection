@@ -75,13 +75,24 @@ python tools/test.py --config configs/experiments/fcos3d_exp_pgda.yaml \
   --checkpoint outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/checkpoints/best.pth
 ```
 
-一次性生成 test 集可视化、正式指标 JSON 和指标图表：
+一次性生成 test 集可视化、正式指标 JSON 和指标图表（默认 split 为 test）：
 
 ```bash
 CHECKPOINT=checkpoints/trained/0909/best.pth \
 CONFIG=configs/experiments/fcos3d_r101_fpn_dcn_full_pgd_local.yaml \
 DEVICE_ID=0 VIZ_MAX_IMAGES=20 \
 scripts/run_test_viz_and_eval.sh
+```
+
+切换到 val 或 train 时可设置 `SPLIT=val`，或在命令末尾追加 `--split val`；
+支持 `train`、`val`、`test`。可视化、指标评估、清单 SHA256 和
+`EVAL_MAX_SAMPLES` 都会使用所选 split。例如：
+
+```bash
+CHECKPOINT=checkpoints/trained/0919/best.pth \
+CONFIG=configs/experiments/fcos3d_exp_pgda_local.yaml \
+DEVICE_ID=0 \
+scripts/run_test_viz_and_eval.sh --split val
 ```
 
 旧框架的 `float-checkpoint-last-71535492.pth.tar` 使用专用兼容配置测试：

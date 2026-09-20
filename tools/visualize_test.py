@@ -284,9 +284,10 @@ def result_to_json(result, classes, max_detections):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize predictions on test split")
+    parser = argparse.ArgumentParser(description="Visualize predictions on a dataset split")
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--output-dir")
     parser.add_argument("--max-images", type=int)
     parser.add_argument("--max-detections", type=int, default=30)
@@ -308,11 +309,11 @@ def main():
     load_checkpoint(args.checkpoint, model, strict=True)
     model.eval()
     processor = FCOS3DPostProcessor(model, config)
-    loader = build_loader(config, "test", max_samples=None)
+    loader = build_loader(config, args.split, max_samples=None)
     dataset = loader.dataset
     output_dir = Path(args.output_dir) if args.output_dir else Path(
         config["experiment"]["output_dir"]
-    ) / config["experiment"]["name"] / "visualizations" / "test"
+    ) / config["experiment"]["name"] / "visualizations" / args.split
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.sampling == "evenly":
         count = len(dataset) if args.max_images is None else min(args.max_images, len(dataset))
@@ -320,7 +321,7 @@ def main():
     else:
         indices = sequential_indices(len(dataset), args.start_index, args.max_images)
     if not indices:
-        raise ValueError("No test frames selected")
+        raise ValueError("No %s frames selected" % args.split)
     summary, errors = [], []
     generated = skipped = failed = 0
     for sequence, index in enumerate(indices):

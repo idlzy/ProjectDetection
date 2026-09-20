@@ -1,10 +1,36 @@
 #!/usr/bin/env bash
-# Visualize and evaluate the MW3D test split with one reproducible command.
+# Visualize and evaluate an MW3D split with one reproducible command.
 
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}"
+
+SPLIT="${SPLIT:-test}"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --split)
+            if [[ $# -lt 2 ]]; then
+                echo "[mw3d-test] ERROR: --split requires train, val or test" >&2
+                exit 2
+            fi
+            SPLIT="$2"
+            shift 2
+            ;;
+        --split=*)
+            SPLIT="${1#--split=}"
+            shift
+            ;;
+        *)
+            echo "[mw3d-test] ERROR: unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+if [[ "${SPLIT}" != "train" && "${SPLIT}" != "val" && "${SPLIT}" != "test" ]]; then
+    echo "[mw3d-test] ERROR: split must be train, val or test: ${SPLIT}" >&2
+    exit 2
+fi
 
 resolve_python() {
     local candidate
@@ -42,7 +68,7 @@ VIZ_MAX_IMAGES="${VIZ_MAX_IMAGES:-}"
 VIZ_START_INDEX="${VIZ_START_INDEX:-0}"
 MAX_DETECTIONS="${MAX_DETECTIONS:-30}"
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
-TAG="${TAG:-mw3d_test_${STAMP}}"
+TAG="${TAG:-mw3d_${SPLIT}_${STAMP}}"
 RUN_DIR="${RUN_DIR:-outputs/test_runs/${TAG}}"
 VIZ_DIR="${VIZ_DIR:-${RUN_DIR}/visualizations}"
 METRIC_JSON="${METRIC_JSON:-${RUN_DIR}/metrics.json}"
@@ -63,6 +89,7 @@ mkdir -p "${VIZ_DIR}" "$(dirname "${METRIC_JSON}")" "${PLOT_DIR}"
 
 echo "[mw3d-test] config=${CONFIG}"
 echo "[mw3d-test] checkpoint=${CHECKPOINT}"
+echo "[mw3d-test] split=${SPLIT}"
 echo "[mw3d-test] python=${PYTHON_BIN}"
 echo "[mw3d-test] device=${DEVICE_ID}"
 echo "[mw3d-test] visualizations=${VIZ_DIR}"
@@ -76,6 +103,7 @@ if [[ "${SKIP_VIZ:-0}" != "1" ]]; then
     viz_args=(
         --config "${CONFIG}"
         --checkpoint "${CHECKPOINT}"
+        --split "${SPLIT}"
         --output-dir "${VIZ_DIR}"
         --max-detections "${MAX_DETECTIONS}"
         --layout grouped
@@ -116,6 +144,7 @@ if [[ "${SKIP_EVAL:-0}" != "1" ]]; then
     eval_args=(
         --config "${CONFIG}"
         --checkpoint "${CHECKPOINT}"
+        --split "${SPLIT}"
         --output "${METRIC_JSON}"
         --plot-dir "${PLOT_DIR}"
         --set "evaluation.score_threshold=${EVAL_SCORE_THR}"
@@ -127,7 +156,7 @@ if [[ "${SKIP_EVAL:-0}" != "1" ]]; then
         eval_args+=(--set "data.ready_root=${READY_ROOT}")
     fi
     if [[ -n "${EVAL_MAX_SAMPLES:-}" ]]; then
-        eval_args+=(--set "runtime.max_test_samples=${EVAL_MAX_SAMPLES}")
+        eval_args+=(--set "runtime.max_${SPLIT}_samples=${EVAL_MAX_SAMPLES}")
         echo "[mw3d-test] WARNING: evaluation limited to ${EVAL_MAX_SAMPLES} samples"
     fi
     if [[ -n "${EVAL_CLASSES}" ]]; then

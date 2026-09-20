@@ -21,37 +21,38 @@ def sha256_file(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Final test evaluation")
+    parser = argparse.ArgumentParser(description="Dataset split evaluation")
     parser.add_argument("--config", required=True); parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--output", help="Write the complete test report JSON here")
     parser.add_argument("--plot-dir", help="Write metric JSON/PNG plots here")
     parser.add_argument("--set", action="append", default=[], dest="overrides")
     args = parser.parse_args()
     config = load_config(args.config, args.overrides)
-    metrics = evaluate_checkpoint(config, args.checkpoint, "test")
+    metrics = evaluate_checkpoint(config, args.checkpoint, args.split)
     if args.output or args.plot_dir:
         experiment_dir = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"]
-        output = Path(args.output) if args.output else experiment_dir / "metrics" / "test_report.json"
+        output = Path(args.output) if args.output else experiment_dir / "metrics" / (args.split + "_report.json")
         plot_dir = Path(args.plot_dir) if args.plot_dir else output.parent / (output.stem + "_plots")
         checkpoint_path = Path(args.checkpoint).resolve()
         ready_root = Path(config["data"].get("ready_root") or config["data"]["data_root"]).resolve()
-        test_manifest = ready_root / "splits" / "test_frames.jsonl"
-        report = write_test_report(
-            metrics,
-            output,
-            plot_dir,
-            {
-                "config": str(Path(args.config).resolve()),
-                "checkpoint": str(checkpoint_path),
-                "checkpoint_sha256": sha256_file(checkpoint_path),
-                "data_root": str(Path(config["data"]["data_root"]).resolve()),
-                "ready_root": str(ready_root),
-                "test_manifest": str(test_manifest),
-                "test_manifest_sha256": sha256_file(test_manifest),
-                "score_threshold": config["evaluation"]["score_threshold"],
-                "distance_thresholds": config["evaluation"]["distance_thresholds"],
-            },
-        )
+        split_manifest = ready_root / "splits" / (args.split + "_frames.jsonl")
+        metadata = {
+            "config": str(Path(args.config).resolve()),
+            "checkpoint": str(checkpoint_path),
+            "checkpoint_sha256": sha256_file(checkpoint_path),
+            "data_root": str(Path(config["data"]["data_root"]).resolve()),
+            "ready_root": str(ready_root),
+            "split": args.split,
+            "split_manifest": str(split_manifest),
+            "split_manifest_sha256": sha256_file(split_manifest),
+            "score_threshold": config["evaluation"]["score_threshold"],
+            "distance_thresholds": config["evaluation"]["distance_thresholds"],
+        }
+        if args.split == "test":
+            metadata["test_manifest"] = metadata["split_manifest"]
+            metadata["test_manifest_sha256"] = metadata["split_manifest_sha256"]
+        report = write_test_report(metrics, output, plot_dir, metadata)
         print(json.dumps({
             "protocol": report["protocol"],
             "metric_json": str(output),

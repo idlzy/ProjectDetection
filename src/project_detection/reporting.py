@@ -324,6 +324,7 @@ def _class_diagnostics(metrics, output_path):
 
 def write_test_report(metrics, metric_path, plot_dir, metadata):
     metric_path, plot_dir = Path(metric_path), Path(plot_dir)
+    split = metadata.get("split", "test")
     plot_dir.mkdir(parents=True, exist_ok=True)
     summary_values = {
         "NDS": metrics["NDS"], "mAP": metrics["mAP"],
@@ -350,7 +351,7 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
         "class_diagnostics": [str(plot_dir / "class_diagnostics.json"), str(plot_dir / "class_diagnostics.png")],
     }
     _write_json(plot_dir / "summary_bars.json", summary_values)
-    _horizontal_bars(summary_values, "MW3D test summary", plot_dir / "summary_bars.png")
+    _horizontal_bars(summary_values, "MW3D %s summary" % split, plot_dir / "summary_bars.png")
     _write_json(plot_dir / "tp_errors.json", tp_error_values)
     _error_bars(tp_error_values, "NDS true-positive errors · 3 terms", plot_dir / "tp_errors.png")
     _write_json(plot_dir / "diagnostic_errors.json", diagnostic_error_values)
@@ -400,7 +401,7 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
             "formulas. NDS uses ATE/ASE/AOE only; it is not directly comparable to "
             "the NuScenes leaderboard. mADE is diagnostic and is not an NDS term."
         ),
-        "split": "test", "metadata": report_metadata, "metrics": metrics,
+        "split": split, "metadata": report_metadata, "metrics": metrics,
         "plot_dir": str(plot_dir), "plots": files,
     }
     _write_json(metric_path, report)
