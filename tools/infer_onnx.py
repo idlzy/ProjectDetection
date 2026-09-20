@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Export FCOS3D raw-head ONNX models and run ONNX Runtime inference.
-
-The exported graph intentionally stops at the five raw feature-pyramid heads.
-Calibration-aware 3D decoding and rotated NMS remain deployment post-processing
-and are not performed by this tool.
-"""
+"""Run calibrated FCOS3D ONNX inference and render its predictions."""
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 from pathlib import Path
 from time import perf_counter
@@ -16,7 +10,6 @@ from time import perf_counter
 import cv2
 import numpy as np
 import torch
-from torch import nn
 
 from project_detection.config import load_config
 from project_detection.data.geometry import load_front_left_calibration
@@ -25,50 +18,12 @@ from project_detection.models import build_model
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import draw_bev, draw_camera_view
 
+if __package__:
+    from tools.onnx_contract import output_fields, output_names
+else:
+    from onnx_contract import output_fields, output_names
 
-BASE_OUTPUT_FIELDS = (
-    "cls",
-    "bbox",
-    "direction",
-    "attribute",
-    "centerness",
-)
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
-
-
-class RawHeadExportWrapper(nn.Module):
-    """Flatten the per-level dictionaries into a stable ONNX output tuple."""
-
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-
-    def forward(self, image):
-        flat = []
-        for level in self.model(image):
-            flat.extend(level[field] for field in BASE_OUTPUT_FIELDS)
-            if level["depth_logits"] is not None:
-                flat.append(level["depth_logits"])
-            if level.get("geo_weight") is not None:
-                flat.append(level["geo_weight"])
-        return tuple(flat)
-
-
-def output_fields(config):
-    fields = list(BASE_OUTPUT_FIELDS)
-    if config["model"]["probabilistic_depth"]:
-        fields.append("depth_logits")
-    if config["model"].get("geometric_depth", False):
-        fields.append("geo_weight")
-    return fields
-
-
-def output_names(config):
-    return [
-        "p%d_%s" % (level, field)
-        for level in range(3, 8)
-        for field in output_fields(config)
-    ]
 
 
 def _require_available_output(path, overwrite):
@@ -79,61 +34,6 @@ def _require_available_output(path, overwrite):
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def legacy_export_options(export_function=torch.onnx.export):
-    """Select the legacy exporter on PyTorch versions that default to Dynamo."""
-    if "dynamo" in inspect.signature(export_function).parameters:
-        return {"dynamo": False}
-    return {}
-
-
-def export_model(config, checkpoint, output, opset=13, overwrite=False):
-    """Export a checkpoint to a checked, fixed-shape raw-head ONNX graph."""
-    output = _require_available_output(output, overwrite)
-    metadata_path = _require_available_output(
-        output.with_suffix(".meta.json"), overwrite
-    )
-    model = build_model(config)
-    load_checkpoint(checkpoint, model, strict=True)
-    model.eval()
-    height, width = config["data"]["image_size"]
-    dummy = torch.zeros(1, 3, height, width, dtype=torch.float32)
-    with torch.no_grad():
-        torch.onnx.export(
-            RawHeadExportWrapper(model),
-            dummy,
-            str(output),
-            input_names=["image"],
-            output_names=output_names(config),
-            opset_version=opset,
-            do_constant_folding=True,
-            **legacy_export_options(),
-        )
-
-    import onnx
-
-    exported = onnx.load(str(output))
-    onnx.checker.check_model(exported)
-    fuse_logit = model.head.depth_fuse_logit
-    metadata = {
-        "format": "project_detection_raw_head_v1",
-        "input_name": "image",
-        "input_shape": [1, 3, height, width],
-        "output_names": output_names(config),
-        "depth_fuse_logit": (
-            float(fuse_logit.detach().cpu()) if fuse_logit is not None else None
-        ),
-        "probabilistic_depth": bool(config["model"]["probabilistic_depth"]),
-        "geometric_depth": bool(
-            config["model"].get("geometric_depth", False)
-        ),
-    }
-    metadata_path.write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return output
 
 
 def collect_images(input_path, recursive=False, max_images=None):
@@ -673,74 +573,59 @@ def infer_model(
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Export and infer FCOS3D raw-head ONNX models"
+        description="Run calibrated FCOS3D ONNX inference and visualization"
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    export_parser = subparsers.add_parser("export", help="Export a checkpoint")
-    export_parser.add_argument("--config", required=True)
-    export_parser.add_argument("--checkpoint", required=True)
-    export_parser.add_argument("--output", required=True)
-    export_parser.add_argument("--opset", type=int, default=13)
-    export_parser.add_argument("--overwrite", action="store_true")
-    export_parser.add_argument(
-        "--set", action="append", default=[], dest="overrides"
-    )
-
-    infer_parser = subparsers.add_parser(
-        "infer", help="Run calibrated ONNX inference and visualization"
-    )
-    infer_parser.add_argument("--config", required=True)
-    infer_parser.add_argument("--model", required=True)
-    infer_parser.add_argument(
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--model", required=True)
+    parser.add_argument(
         "--checkpoint",
         help="Checkpoint for learned host post-process state; defaults to ONNX sibling .pth",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--image", required=True, help="One image or a directory of images"
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--calib-path", "--calib", required=True, dest="calib_path",
         help="Required FrontViewCalibParam JSON shared by input images",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--extri-path", "--extrinsic", dest="extri_path",
         help="Optional shared TXT or directory of per-frame <image-stem>.txt files",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--output",
         help="Visualization image for one input, or directory for folder input",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--no-visualize", action="store_true",
         help="Disable visualization (enabled by default)",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--save-bev", action="store_true",
         help="Save an additional bird's-eye-view image",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--raw-output",
         help="Optional .npz for one image, or raw-output directory for folder input",
     )
-    infer_parser.add_argument("--summary", help="Optional timing/result JSON")
-    infer_parser.add_argument("--recursive", action="store_true")
-    infer_parser.add_argument("--max-images", type=int)
-    infer_parser.add_argument(
+    parser.add_argument("--summary", help="Optional timing/result JSON")
+    parser.add_argument("--recursive", action="store_true")
+    parser.add_argument("--max-images", type=int)
+    parser.add_argument(
         "--provider", action="append", dest="providers",
         help="ONNX Runtime provider; repeat to set fallback order",
     )
-    infer_parser.add_argument(
+    parser.add_argument(
         "--postprocess-device", default="cuda",
         help="Torch device for official post-processing (must be CUDA)",
     )
-    infer_parser.add_argument("--score-threshold", type=float)
-    infer_parser.add_argument("--nms-pre", type=int)
-    infer_parser.add_argument("--nms-threshold", type=float)
-    infer_parser.add_argument("--nms-pairwise-chunk-size", type=int)
-    infer_parser.add_argument("--max-per-image", type=int)
-    infer_parser.add_argument("--overwrite", action="store_true")
-    infer_parser.add_argument(
+    parser.add_argument("--score-threshold", type=float)
+    parser.add_argument("--nms-pre", type=int)
+    parser.add_argument("--nms-threshold", type=float)
+    parser.add_argument("--nms-pairwise-chunk-size", type=int)
+    parser.add_argument("--max-per-image", type=int)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
         "--set", action="append", default=[], dest="overrides"
     )
     return parser
@@ -749,17 +634,6 @@ def build_parser():
 def main():
     args = build_parser().parse_args()
     config = load_config(args.config, args.overrides)
-    if args.command == "export":
-        output = export_model(
-            config,
-            args.checkpoint,
-            args.output,
-            opset=args.opset,
-            overwrite=args.overwrite,
-        )
-        print("Exported and checked: %s" % output)
-        return
-
     evaluation_overrides = {
         "score_threshold": args.score_threshold,
         "nms_pre": args.nms_pre,

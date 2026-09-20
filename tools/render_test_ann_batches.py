@@ -27,7 +27,7 @@ from project_detection.models import build_model
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import draw_camera_view
 if __package__:
-    from tools.export_and_infer_onnx import (
+    from tools.infer_onnx import (
         _synchronize,
         load_postprocess_model,
         prepare_sample,
@@ -36,7 +36,7 @@ if __package__:
         validate_input,
     )
 else:
-    from export_and_infer_onnx import (
+    from infer_onnx import (
         _synchronize,
         load_postprocess_model,
         prepare_sample,

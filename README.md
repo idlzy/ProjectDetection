@@ -294,7 +294,13 @@ python tools/infer.py --config configs/experiments/fcos3d_exp_pgda.yaml \
   --image path/to/image.jpg --calib path/to/FrontViewCalibParam.json
 
 python tools/export_onnx.py --config configs/experiments/fcos3d_exp_pgda.yaml \
-  --checkpoint outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/checkpoints/best.pth
+  --checkpoint outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/checkpoints/best.pth \
+  --output outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/model.onnx
+
+python tools/infer_onnx.py --config configs/experiments/fcos3d_exp_pgda.yaml \
+  --model outputs/fcos3d_mw3d_ready_v5_bgr_exp_pgda/model.onnx \
+  --image path/to/image.jpg --calib-path path/to/FrontViewCalibParam.json \
+  --output outputs/onnx_inference.jpg
 ```
 
 单图推理需要使用逐帧外参时，额外传入 HAT 格式的
