@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import matplotlib
@@ -322,6 +323,51 @@ def _class_diagnostics(metrics, output_path):
     _finish_figure(figure, output_path)
 
 
+def _confidence_curve(thresholds, values, title, output_path, color=BLUE):
+    figure, axis = plt.subplots(figsize=(11, 5.5))
+    axis.plot(thresholds, values, color=color, linewidth=1.8)
+    axis.fill_between(thresholds, values, color=color, alpha=0.14)
+    axis.set_xlim(0.01, 1.0)
+    axis.set_ylim(bottom=0)
+    axis.set_xlabel("Confidence bin upper bound")
+    axis.set_ylabel("Predicted bbox count per 0.01 bin")
+    axis.set_title(title, loc="left", pad=14)
+    _decorate_axis(axis, grid_axis="both")
+    _finish_figure(figure, output_path)
+
+
+def _safe_plot_name(value):
+    name = re.sub(r"[^0-9A-Za-z._-]+", "_", str(value)).strip("._")
+    return name or "class"
+
+
+def _write_confidence_distribution(metrics, plot_dir):
+    payload = metrics.get("confidence_distribution")
+    if not payload:
+        return None
+    output_dir = Path(plot_dir) / "confidence_distribution"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(output_dir / "distribution.json", payload)
+    thresholds = payload["bin_upper_bounds"]
+    generated = [str(output_dir / "distribution.json")]
+    total_path = output_dir / "total.png"
+    _confidence_curve(
+        thresholds, payload["total"]["bin_counts"],
+        "All classes · confidence distribution", total_path,
+    )
+    generated.append(str(total_path))
+    colors = (ORANGE, GREEN, RED, PURPLE, CYAN, BLUE)
+    for index, (class_name, distribution) in enumerate(payload["per_class"].items()):
+        output_path = output_dir / ("class_%s.png" % _safe_plot_name(class_name))
+        _confidence_curve(
+            thresholds, distribution["bin_counts"],
+            "%s · confidence distribution" % class_name, output_path,
+            colors[index % len(colors)],
+        )
+        generated.append(str(output_path))
+    return generated
+
+
 def write_test_report(metrics, metric_path, plot_dir, metadata):
     metric_path, plot_dir = Path(metric_path), Path(plot_dir)
     split = metadata.get("split", "test")
@@ -382,6 +428,9 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
     _performance_overview(metrics, plot_dir / "performance_overview.png")
     _write_json(plot_dir / "class_diagnostics.json", metrics.get("per_class_detection", {}))
     _class_diagnostics(metrics, plot_dir / "class_diagnostics.png")
+    confidence_files = _write_confidence_distribution(metrics, plot_dir)
+    if confidence_files is not None:
+        files["confidence_distribution"] = confidence_files
     plot_index = {"backend": "matplotlib", "plot_dir": str(plot_dir), "files": files}
     _write_json(plot_dir / "plots_index.json", plot_index)
     report_metadata = dict(metadata)

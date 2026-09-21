@@ -273,6 +273,47 @@ class Mw3dMetric:
             return "%gm+" % lower
         return "%g-%gm" % (lower, upper)
 
+    def _confidence_distribution(self):
+        """Count evaluated predictions in 100 confidence bins over [0, 1]."""
+        edges = np.linspace(0.0, 1.0, 101, dtype=np.float64)
+        thresholds = edges[1:]
+
+        def distribution(scores):
+            scores = np.asarray(scores, dtype=np.float64)
+            scores = scores[np.isfinite(scores)]
+            # Model scores are probabilities. Clipping keeps every prediction
+            # accounted for if a custom postprocessor has tiny numeric drift.
+            scores = np.clip(scores, 0.0, 1.0)
+            bin_indices = np.clip(np.ceil(scores * 100.0).astype(np.int64) - 1, 0, 99)
+            counts = np.bincount(bin_indices, minlength=100)
+            sorted_scores = np.sort(scores)
+            cumulative = len(scores) - np.searchsorted(
+                sorted_scores, thresholds - 1e-8, side="left"
+            )
+            return {
+                "num_predictions": int(len(scores)),
+                "bin_counts": counts.astype(np.int64).tolist(),
+                "count_ge_threshold": cumulative.astype(np.int64).tolist(),
+            }
+
+        total_scores = []
+        scores_by_class = {class_id: [] for class_id in self.class_ids}
+        for _, scores, labels, _, _ in self.samples:
+            evaluated = np.isin(labels, self.class_ids)
+            total_scores.extend(scores[evaluated].tolist())
+            for class_id in self.class_ids:
+                scores_by_class[class_id].extend(scores[labels == class_id].tolist())
+        return {
+            "bin_upper_bounds": thresholds.tolist(),
+            "bin_width": 0.01,
+            "interval_convention": "[0, 0.01], then (lower, upper]",
+            "total": distribution(total_scores),
+            "per_class": {
+                self.all_class_names[class_id]: distribution(scores_by_class[class_id])
+                for class_id in self.class_ids
+            },
+        }
+
     def compute(self):
         per_class_ap = {}
         per_class_ap_by_distance = {}
@@ -421,6 +462,7 @@ class Mw3dMetric:
             "per_class_AP_by_distance": per_class_ap_by_distance,
             "per_class_PR": per_class_pr,
             "per_class_detection": per_class_detection,
+            "confidence_distribution": self._confidence_distribution(),
             "recall_by_depth_bin": recall_by_depth_bin,
             "depth_bin_counts": depth_counts,
             "confusion_matrix": {
