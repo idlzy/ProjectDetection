@@ -111,6 +111,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     nms_chunk_size = config["evaluation"].get("nms_pairwise_chunk_size", 32)
     if not isinstance(nms_chunk_size, int) or isinstance(nms_chunk_size, bool) or nms_chunk_size < 1:
         raise ValueError("evaluation.nms_pairwise_chunk_size must be a positive integer")
+    nms_mode = config["evaluation"].get("nms_mode", "global")
+    if nms_mode not in ("global", "class"):
+        raise ValueError("evaluation.nms_mode must be global or class")
     sharing_strategy = config["data"].get("multiprocessing_sharing_strategy")
     if sharing_strategy not in (None, "file_descriptor", "file_system"):
         raise ValueError(

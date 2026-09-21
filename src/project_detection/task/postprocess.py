@@ -61,6 +61,7 @@ class FCOS3DPostProcessor:
         self.score_threshold = evaluation["score_threshold"]
         self.nms_pre = evaluation["nms_pre"]
         self.nms_threshold = evaluation["nms_threshold"]
+        self.nms_mode = evaluation.get("nms_mode", "global")
         self.nms_pairwise_chunk_size = evaluation.get(
             "nms_pairwise_chunk_size", 32
         )
@@ -79,6 +80,25 @@ class FCOS3DPostProcessor:
             index for index, name in enumerate(config["data"]["classes"])
             if name in enabled_names
         }
+
+    def _nms(self, boxes3d, scores, labels):
+        if self.nms_mode == "global":
+            return rotated_bev_nms(
+                boxes3d,
+                scores,
+                self.nms_threshold,
+                pairwise_chunk_size=self.nms_pairwise_chunk_size,
+            )
+        kept = []
+        for label in labels.unique():
+            indices = torch.where(labels == label)[0]
+            kept.append(indices[rotated_bev_nms(
+                boxes3d[indices],
+                scores[indices],
+                self.nms_threshold,
+                pairwise_chunk_size=self.nms_pairwise_chunk_size,
+            )])
+        return torch.cat(kept)
 
     @torch.no_grad()
     def __call__(self, outputs, targets):
@@ -196,14 +216,8 @@ class FCOS3DPostProcessor:
             half_h = (k[1, 1] * dims[:, 1] / z.clamp_min(1e-3)) / 2
             image_boxes = torch.stack([centers2d[:,0]-half_w, centers2d[:,1]-half_h,
                                        centers2d[:,0]+half_w, centers2d[:,1]+half_h], 1)
-            kept = []
-            for label in labels.unique():
-                indices = torch.where(labels == label)[0]
-                kept.append(indices[rotated_bev_nms(
-                    boxes3d[indices], scores[indices], self.nms_threshold,
-                    pairwise_chunk_size=self.nms_pairwise_chunk_size,
-                )])
-            kept = torch.cat(kept); kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
+            kept = self._nms(boxes3d, scores, labels)
+            kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
             result = {
                 "boxes3d": boxes3d[kept],
                 "scores": scores[kept],
@@ -343,8 +357,9 @@ class FCOS3DPostProcessor:
             all_scores = torch.cat(class_scores_by_level)
             all_rank_scores = torch.cat(rank_scores_by_level)
             all_source_levels = torch.cat(source_levels_by_level)
-            kept_boxes, kept_image_boxes = [], []
-            kept_scores, kept_labels, kept_rank, kept_source_levels = [], [], [], []
+            candidate_boxes, candidate_image_boxes = [], []
+            candidate_scores, candidate_labels = [], []
+            candidate_rank, candidate_source_levels = [], []
             for label in sorted(self.evaluation_class_ids):
                 valid = all_scores[:, label] >= self.score_threshold
                 if not valid.any():
@@ -353,24 +368,18 @@ class FCOS3DPostProcessor:
                 label_image_boxes = all_image_boxes[valid]
                 label_scores = all_scores[valid, label]
                 label_rank = all_rank_scores[valid, label]
-                keep = rotated_bev_nms(
-                    label_boxes,
-                    label_rank,
-                    self.nms_threshold,
-                    pairwise_chunk_size=self.nms_pairwise_chunk_size,
-                )
-                kept_boxes.append(label_boxes[keep])
-                kept_image_boxes.append(label_image_boxes[keep])
-                kept_scores.append(label_scores[keep])
-                kept_rank.append(label_rank[keep])
-                kept_source_levels.append(all_source_levels[valid][keep])
-                kept_labels.append(
+                candidate_boxes.append(label_boxes)
+                candidate_image_boxes.append(label_image_boxes)
+                candidate_scores.append(label_scores)
+                candidate_rank.append(label_rank)
+                candidate_source_levels.append(all_source_levels[valid])
+                candidate_labels.append(
                     torch.full(
-                        (keep.numel(),), label, dtype=torch.long,
+                        (label_boxes.shape[0],), label, dtype=torch.long,
                         device=all_boxes.device,
                     )
                 )
-            if not kept_boxes:
+            if not candidate_boxes:
                 results.append(
                     {
                         "boxes3d": all_boxes.new_empty((0, 9)),
@@ -386,13 +395,14 @@ class FCOS3DPostProcessor:
                     }
                 )
                 continue
-            boxes = torch.cat(kept_boxes)
-            image_boxes = torch.cat(kept_image_boxes)
-            scores = torch.cat(kept_scores)
-            labels = torch.cat(kept_labels)
-            ranking = torch.cat(kept_rank)
-            source_levels = torch.cat(kept_source_levels)
-            order = ranking.argsort(descending=True)[: self.max_per_image]
+            boxes = torch.cat(candidate_boxes)
+            image_boxes = torch.cat(candidate_image_boxes)
+            scores = torch.cat(candidate_scores)
+            labels = torch.cat(candidate_labels)
+            ranking = torch.cat(candidate_rank)
+            source_levels = torch.cat(candidate_source_levels)
+            kept = self._nms(boxes, ranking, labels)
+            order = kept[ranking[kept].argsort(descending=True)[: self.max_per_image]]
             results.append(
                 {
                     "boxes3d": boxes[order],

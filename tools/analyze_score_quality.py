@@ -263,7 +263,7 @@ def run_checkpoint(config, checkpoint, loader, device, output_dir, split, manife
         "checkpoint_sha256": sha256_file(checkpoint),
         "manifest_sha256": manifest_hash,
         "evaluation_config": {key: evaluation.get(key) for key in (
-            "classes", "score_threshold", "nms_pre", "nms_threshold",
+            "classes", "score_threshold", "nms_pre", "nms_threshold", "nms_mode",
             "nms_pairwise_chunk_size", "max_per_image", "distance_thresholds",
             "tp_distance_threshold", "depth_bins"
         )},
@@ -322,7 +322,7 @@ def main():
         "max_samples": args.max_samples,
         "device": str(device),
         "evaluation_config": {key: config["evaluation"].get(key) for key in (
-            "classes", "score_threshold", "nms_pre", "nms_threshold",
+            "classes", "score_threshold", "nms_pre", "nms_threshold", "nms_mode",
             "nms_pairwise_chunk_size", "max_per_image", "distance_thresholds",
             "tp_distance_threshold", "depth_bins"
         )},

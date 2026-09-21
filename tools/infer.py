@@ -288,6 +288,7 @@ def main():
                 "score_threshold": config["evaluation"]["score_threshold"],
                 "nms_pre": config["evaluation"]["nms_pre"],
                 "nms_threshold": config["evaluation"]["nms_threshold"],
+                "nms_mode": config["evaluation"].get("nms_mode", "global"),
                 "max_per_image": config["evaluation"]["max_per_image"],
             })
             details_path = head_report_path(camera_path)
