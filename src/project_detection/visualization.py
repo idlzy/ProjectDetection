@@ -169,6 +169,7 @@ def draw_camera_view(
     boxes = result["boxes3d"][:max_detections].cpu()
     scores = result["scores"][:max_detections].cpu()
     labels = result["labels"][:max_detections].cpu()
+    depth_confidences = result.get("depth_confidence")
     valid = result.get("geometry_valid")
     weights = result.get("depth_fusion_weight")
     for index, (box, score, label) in enumerate(zip(boxes, scores, labels)):
@@ -183,9 +184,14 @@ def draw_camera_view(
         suffix = ""
         if valid is not None and bool(valid[index]):
             suffix = " G w=%.2f" % float(weights[index])
-        text = "%s %.2f z=%.1fm%s" % (
+        confidence_text = (
+            " depth_conf=%.2f" % float(depth_confidences[index])
+            if depth_confidences is not None else ""
+        )
+        text = "%s score=%.2f%s z=%.1fm%s" % (
             classes[int(label)],
             float(score),
+            confidence_text,
             float(box[2]),
             suffix,
         )
@@ -261,17 +267,22 @@ def draw_bev(
                 GROUND_TRUTH_COLOR,
                 2,
             )
-    for box, score, label in zip(
+    depth_confidences = result.get("depth_confidence")
+    for index, (box, score, label) in enumerate(zip(
         result["boxes3d"][:max_detections].cpu().numpy(),
         result["scores"][:max_detections].cpu().numpy(),
         result["labels"][:max_detections].cpu().numpy(),
-    ):
+    )):
         points = project(bev_corners(box))
         color = color_for_class(int(label))
         cv2.polylines(canvas, [points], True, color, 2)
         cv2.putText(
             canvas,
-            "%.2f" % score,
+            "score=%.2f%s" % (
+                score,
+                " dc=%.2f" % float(depth_confidences[index])
+                if depth_confidences is not None else "",
+            ),
             tuple(points[0]),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.4,

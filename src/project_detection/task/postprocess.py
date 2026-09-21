@@ -115,19 +115,6 @@ class FCOS3DPostProcessor:
                 local_depth, depth_confidence = self.model.head.decode_depth_candidates(
                     raw[:, 2], probability
                 )
-                flat_scores = flat_scores * depth_confidence
-                # The externally reported PGDA score includes depth confidence.
-                # Apply the threshold again after fusion so visualization and
-                # evaluation never contain scores below score_threshold.
-                final_keep = flat_scores >= self.score_threshold
-                if not final_keep.any():
-                    continue
-                flat_scores = flat_scores[final_keep]
-                class_ids = class_ids[final_keep]
-                locations = locations[final_keep]
-                raw = raw[final_keep]
-                local_depth = local_depth[final_keep]
-                depth_confidence = depth_confidence[final_keep]
                 points = feature_points(height, width, stride, raw.device)[locations]
                 centers2d = points + raw[:, :2] * stride
                 cls_vectors = cls.permute(1, 2, 0).reshape(-1, cls.shape[0])[locations]
@@ -143,7 +130,7 @@ class FCOS3DPostProcessor:
                 scores.append(flat_scores); labels.append(class_ids)
             if not scores:
                 device = outputs[0]["cls"].device
-                results.append({"boxes3d": torch.empty((0,9),device=device), "scores": torch.empty(0,device=device), "labels": torch.empty(0,dtype=torch.long,device=device)})
+                results.append({"boxes3d": torch.empty((0,9),device=device), "scores": torch.empty(0,device=device), "depth_confidence": torch.empty(0,device=device), "labels": torch.empty(0,dtype=torch.long,device=device)})
                 continue
             raw = torch.cat(raws)
             local_depth = torch.cat(local_depths)
@@ -205,7 +192,7 @@ class FCOS3DPostProcessor:
                     pairwise_chunk_size=self.nms_pairwise_chunk_size,
                 )])
             kept = torch.cat(kept); kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
-            result = {"boxes3d": boxes3d[kept], "scores": scores[kept], "labels": labels[kept], "boxes2d": image_boxes[kept]}
+            result = {"boxes3d": boxes3d[kept], "scores": scores[kept], "depth_confidence": depth_confidence[kept], "labels": labels[kept], "boxes2d": image_boxes[kept]}
             if geo_weight is not None:
                 result.update({
                     "depth_local": local_depth[kept],

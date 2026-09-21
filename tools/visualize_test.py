@@ -173,6 +173,7 @@ def draw_camera_view(
     scores = result["scores"][:max_detections].cpu()
     labels = result["labels"][:max_detections].cpu()
     depths = result["boxes3d"][:max_detections, 2].cpu()
+    depth_confidences = result.get("depth_confidence")
     valid = result.get("geometry_valid")
     weights = result.get("depth_fusion_weight")
     for index, (box, score, label, depth_value) in enumerate(
@@ -189,8 +190,13 @@ def draw_camera_view(
         suffix = ""
         if valid is not None and bool(valid[index]):
             suffix = " G w=%.2f" % float(weights[index])
-        text = "%s %.2f z=%.1fm%s" % (
-            classes[int(label)], float(score), float(depth_value), suffix
+        confidence_text = (
+            " depth_conf=%.2f" % float(depth_confidences[index])
+            if depth_confidences is not None else ""
+        )
+        text = "%s score=%.2f%s z=%.1fm%s" % (
+            classes[int(label)], float(score), confidence_text,
+            float(depth_value), suffix,
         )
         draw_label(image, text, (max(x, 0), max(y, 0)), color)
     return image
@@ -233,15 +239,20 @@ def draw_bev(target, result, classes, max_detections, size=(700, 700)):
             GROUND_TRUTH_COLOR,
             2,
         )
-    for box, score, label in zip(
+    depth_confidences = result.get("depth_confidence")
+    for index, (box, score, label) in enumerate(zip(
         result["boxes3d"][:max_detections].cpu().numpy(),
         result["scores"][:max_detections].cpu().numpy(),
         result["labels"][:max_detections].cpu().numpy(),
-    ):
+    )):
         points = project(bev_corners(box))
         color = color_for_class(int(label))
         cv2.polylines(canvas, [points], True, color, 2)
-        cv2.putText(canvas, "%.2f" % score, tuple(points[0]), cv2.FONT_HERSHEY_SIMPLEX, .4, color, 1)
+        confidence_text = (
+            " dc=%.2f" % float(depth_confidences[index])
+            if depth_confidences is not None else ""
+        )
+        cv2.putText(canvas, "score=%.2f%s" % (score, confidence_text), tuple(points[0]), cv2.FONT_HERSHEY_SIMPLEX, .4, color, 1)
     cv2.putText(canvas, "GT=black, prediction=class color", (20, 22), cv2.FONT_HERSHEY_SIMPLEX, .5, (30, 30, 30), 1)
     return canvas
 
@@ -272,6 +283,8 @@ def result_to_json(result, classes, max_detections):
             "box2d": result["boxes2d"][index].cpu().tolist(),
             "box3d": result["boxes3d"][index].cpu().tolist(),
         }
+        if "depth_confidence" in result:
+            item["depth_confidence"] = float(result["depth_confidence"][index])
         if "depth_local" in result:
             item.update(
                 depth_local=float(result["depth_local"][index]),
