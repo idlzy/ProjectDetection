@@ -194,7 +194,7 @@ def seed_everything(seed):
 def _num_workers_for_split(data, split):
     if split == "train":
         return data["num_workers"]
-    return data.get("val_num_workers", data["num_workers"])
+    return data.get("val_num_workers", 0)
 
 
 def build_loader(config, split, world_size=1, max_samples=None, rank=0):
@@ -241,13 +241,17 @@ def build_loader(config, split, world_size=1, max_samples=None, rank=0):
         # allowing an orphan worker to retain a crashed rank's CUDA context.
         # ``spawn`` starts each worker in a clean Python interpreter instead.
         loader_kwargs["multiprocessing_context"] = "spawn"
+        loader_kwargs["persistent_workers"] = data.get(
+            "persistent_workers", True
+        )
+        loader_kwargs["prefetch_factor"] = data.get("prefetch_factor", 2)
     return DataLoader(
         dataset,
         batch_size=data["batch_size_per_gpu"],
         shuffle=False,
         sampler=sampler,
         num_workers=num_workers,
-        pin_memory=False,
+        pin_memory=data.get("pin_memory", True),
         collate_fn=collate_detection_batch,
         drop_last=split == "train",
         generator=worker_generator,

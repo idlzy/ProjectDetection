@@ -54,9 +54,7 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("data.image_std values must be non-zero")
     worker_settings = {
         "num_workers": config["data"].get("num_workers"),
-        "val_num_workers": config["data"].get(
-            "val_num_workers", config["data"].get("num_workers")
-        ),
+        "val_num_workers": config["data"].get("val_num_workers", 0),
     }
     for key, value in worker_settings.items():
         if (
@@ -67,6 +65,16 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValueError(
                 "data.%s must be a non-negative integer" % key
             )
+    for key, default in (("pin_memory", True), ("persistent_workers", True)):
+        if not isinstance(config["data"].get(key, default), bool):
+            raise ValueError("data.%s must be true or false" % key)
+    prefetch_factor = config["data"].get("prefetch_factor", 2)
+    if (
+        not isinstance(prefetch_factor, int)
+        or isinstance(prefetch_factor, bool)
+        or prefetch_factor < 1
+    ):
+        raise ValueError("data.prefetch_factor must be a positive integer")
     if config["model"]["depth_mode"] not in ("exp", "linear"):
         raise ValueError("model.depth_mode must be exp or linear")
     if len(config["model"]["strides"]) != 5:
