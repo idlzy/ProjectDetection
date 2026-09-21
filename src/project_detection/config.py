@@ -52,6 +52,21 @@ def validate_config(config: Dict[str, Any]) -> None:
             raise ValueError("data.%s must contain three channel values" % key)
     if any(value == 0 for value in config["data"].get("image_std", ())):
         raise ValueError("data.image_std values must be non-zero")
+    worker_settings = {
+        "num_workers": config["data"].get("num_workers"),
+        "val_num_workers": config["data"].get(
+            "val_num_workers", config["data"].get("num_workers")
+        ),
+    }
+    for key, value in worker_settings.items():
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+        ):
+            raise ValueError(
+                "data.%s must be a non-negative integer" % key
+            )
     if config["model"]["depth_mode"] not in ("exp", "linear"):
         raise ValueError("model.depth_mode must be exp or linear")
     if len(config["model"]["strides"]) != 5:

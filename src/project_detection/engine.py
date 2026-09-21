@@ -191,8 +191,15 @@ def seed_everything(seed):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
 
 
+def _num_workers_for_split(data, split):
+    if split == "train":
+        return data["num_workers"]
+    return data.get("val_num_workers", data["num_workers"])
+
+
 def build_loader(config, split, world_size=1, max_samples=None, rank=0):
     data = config["data"]
+    num_workers = _num_workers_for_split(data, split)
     sharing_strategy = data.get("multiprocessing_sharing_strategy")
     if sharing_strategy is not None:
         torch.multiprocessing.set_sharing_strategy(sharing_strategy)
@@ -228,7 +235,7 @@ def build_loader(config, split, world_size=1, max_samples=None, rank=0):
         + rank * 1000
     )
     loader_kwargs = {}
-    if data["num_workers"] > 0:
+    if num_workers > 0:
         # CUDA is initialized before DataLoader starts its workers. Linux'
         # default ``fork`` would copy CUDA driver handles into each worker,
         # allowing an orphan worker to retain a crashed rank's CUDA context.
@@ -239,7 +246,7 @@ def build_loader(config, split, world_size=1, max_samples=None, rank=0):
         batch_size=data["batch_size_per_gpu"],
         shuffle=False,
         sampler=sampler,
-        num_workers=data["num_workers"],
+        num_workers=num_workers,
         pin_memory=False,
         collate_fn=collate_detection_batch,
         drop_last=split == "train",
