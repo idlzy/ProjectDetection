@@ -32,11 +32,12 @@ class FCOS3D(nn.Module):
         head_norm="batch",
         dcn_on_last_conv=False,
         deform_groups=1,
-        attribute_chain=False,
+        attribute_prediction_mode="parallel",
+        chain_reliability_threshold=0.2,
     ):
         super().__init__()
-        if attribute_chain and backbone == "legacy_hat_efficientnet_b0":
-            raise ValueError("attribute_chain is not supported by Legacy HAT")
+        if attribute_prediction_mode != "parallel" and backbone == "legacy_hat_efficientnet_b0":
+            raise ValueError("Legacy HAT supports only parallel attribute prediction")
         if backbone == "efficientnet_b0":
             self.backbone = EfficientNetB0()
         elif backbone == "legacy_hat_efficientnet_b0":
@@ -88,7 +89,8 @@ class FCOS3D(nn.Module):
                 normalization=head_norm,
                 dcn_on_last_conv=dcn_on_last_conv,
                 deform_groups=deform_groups,
-                attribute_chain=attribute_chain,
+                attribute_prediction_mode=attribute_prediction_mode,
+                chain_reliability_threshold=chain_reliability_threshold,
             )
 
     def forward(self, images):

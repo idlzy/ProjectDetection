@@ -125,13 +125,17 @@ class FCOS3DHead(nn.Module):
         normalization="batch",
         dcn_on_last_conv=False,
         deform_groups=1,
-        attribute_chain=False,
+        attribute_prediction_mode="parallel",
+        chain_reliability_threshold=0.2,
     ):
         super().__init__()
+        if attribute_prediction_mode not in ("parallel", "chain", "adaptive"):
+            raise ValueError("Unknown attribute prediction mode")
         self.num_classes = num_classes
         self.probabilistic_depth = probabilistic_depth
         self.geometric_depth = geometric_depth
-        self.attribute_chain = attribute_chain
+        self.attribute_prediction_mode = attribute_prediction_mode
+        self.chain_reliability_threshold = chain_reliability_threshold
         self.num_levels = 5
         self.group_reg_dims = (2, 1, 3, 1)
         self.register_buffer(
@@ -179,11 +183,11 @@ class FCOS3DHead(nn.Module):
         )
         self.size_to_orientation = (
             nn.Conv2d(feat_channels, feat_channels, 1, bias=False)
-            if attribute_chain else None
+            if attribute_prediction_mode != "parallel" else None
         )
         self.orientation_to_depth = (
             nn.Conv2d(feat_channels, feat_channels, 1, bias=False)
-            if attribute_chain else None
+            if attribute_prediction_mode != "parallel" else None
         )
         self.direction_branch = _MultiLevelTower(
             feat_channels, feat_channels, 1, **branch_options
@@ -213,13 +217,47 @@ class FCOS3DHead(nn.Module):
         self.conv_geo_weight = (
             nn.Conv2d(feat_channels, 1, 1) if geometric_depth else None
         )
+        self.parallel_depth_log_scale = (
+            nn.Conv2d(feat_channels, 1, 1)
+            if attribute_prediction_mode == "adaptive" else None
+        )
+        self.chain_depth_log_scale = (
+            nn.Conv2d(feat_channels, 1, 1)
+            if attribute_prediction_mode == "adaptive" else None
+        )
         self.scales = nn.ParameterList(
             [nn.Parameter(torch.ones(1)) for _ in range(self.num_levels)]
         )
         self._init_weights()
-        if self.attribute_chain:
+        if self.attribute_prediction_mode != "parallel":
             nn.init.zeros_(self.size_to_orientation.weight)
             nn.init.zeros_(self.orientation_to_depth.weight)
+        if self.attribute_prediction_mode == "adaptive":
+            nn.init.zeros_(self.parallel_depth_log_scale.weight)
+            nn.init.zeros_(self.parallel_depth_log_scale.bias)
+            nn.init.zeros_(self.chain_depth_log_scale.weight)
+            nn.init.zeros_(self.chain_depth_log_scale.bias)
+
+    def _predict_attributes(self, regression_features, direction_input, level):
+        bbox_groups = [
+            predictor(branch_feature)
+            for predictor, branch_feature in zip(self.conv_regs, regression_features)
+        ]
+        depth_feature = regression_features[1]
+        return {
+            "bbox": torch.cat(bbox_groups, dim=1) * self.scales[level],
+            "direction": self.conv_dir(
+                self.direction_branch(direction_input, level)
+            ),
+            "depth_logits": (
+                self.conv_depth_prob(depth_feature)
+                if self.conv_depth_prob is not None else None
+            ),
+            "geo_weight": (
+                self.conv_geo_weight(depth_feature)
+                if self.conv_geo_weight is not None else None
+            ),
+        }
 
     def _init_weights(self):
         for module in self.modules():
@@ -249,48 +287,55 @@ class FCOS3DHead(nn.Module):
             regression_features = [
                 branch(reg_feature, level) for branch in self.reg_branches
             ]
-            direction_input = reg_feature
-            if self.attribute_chain:
+            parallel_features = list(regression_features)
+            if self.attribute_prediction_mode != "parallel":
                 size_delta = self.size_to_orientation(regression_features[2])
                 regression_features[3] = regression_features[3] + size_delta
                 regression_features[1] = regression_features[1] + (
                     self.orientation_to_depth(regression_features[3])
                 )
                 direction_input = reg_feature + size_delta
-            bbox_groups = [
-                predictor(branch_feature)
-                for predictor, branch_feature in zip(
-                    self.conv_regs, regression_features
-                )
-            ]
-            bbox = torch.cat(bbox_groups, dim=1) * self.scales[level]
-            depth_feature = regression_features[1]
-
-            outputs.append(
-                {
-                    "cls": self.conv_cls(cls_branch),
-                    "bbox": bbox,
-                    "direction": self.conv_dir(
-                        self.direction_branch(direction_input, level)
-                    ),
-                    "attribute": self.conv_attr(
-                        self.attribute_branch(cls_feature, level)
-                    ),
-                    "centerness": self.conv_centerness(
-                        self.centerness_branch(reg_feature, level)
-                    ),
-                    "depth_logits": (
-                        self.conv_depth_prob(depth_feature)
-                        if self.conv_depth_prob is not None
-                        else None
-                    ),
-                    "geo_weight": (
-                        self.conv_geo_weight(depth_feature)
-                        if self.conv_geo_weight is not None
-                        else None
-                    ),
-                }
+            else:
+                direction_input = reg_feature
+            common = {
+                "cls": self.conv_cls(cls_branch),
+                "attribute": self.conv_attr(
+                    self.attribute_branch(cls_feature, level)
+                ),
+                "centerness": self.conv_centerness(
+                    self.centerness_branch(reg_feature, level)
+                ),
+            }
+            active = self._predict_attributes(
+                regression_features, direction_input, level
             )
+            if self.attribute_prediction_mode == "adaptive":
+                parallel = self._predict_attributes(
+                    parallel_features, reg_feature, level
+                )
+                parallel["depth_log_scale"] = self.parallel_depth_log_scale(
+                    parallel_features[1]
+                ).clamp(-5.0, 5.0)
+                active["depth_log_scale"] = self.chain_depth_log_scale(
+                    regression_features[1]
+                ).clamp(-5.0, 5.0)
+                choose_chain = (
+                    (active["depth_log_scale"] <= parallel["depth_log_scale"])
+                    & (active["depth_log_scale"].float().neg().exp()
+                       >= self.chain_reliability_threshold)
+                )
+                selected = {
+                    key: (
+                        torch.where(choose_chain, active[key], parallel[key])
+                        if active[key] is not None else None
+                    )
+                    for key in ("bbox", "direction", "depth_logits", "geo_weight")
+                }
+                selected["parallel"] = dict(common, **parallel)
+                selected["chain"] = dict(common, **active)
+                selected["chain_selected"] = choose_chain
+                active = selected
+            outputs.append(dict(common, **active))
         return outputs
 
     def decode_depth(self, direct_raw, depth_logits=None):

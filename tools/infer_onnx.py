@@ -297,6 +297,20 @@ def load_postprocess_model(config, model_path, checkpoint, device):
                 % metadata_path.name
             )
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        exported_mode = metadata.get("attribute_prediction_mode")
+        configured_mode = config["model"].get("attribute_prediction_mode", "parallel")
+        if exported_mode is not None and exported_mode != configured_mode:
+            raise ValueError(
+                "ONNX attribute prediction mode mismatch: exported=%s configured=%s"
+                % (exported_mode, configured_mode)
+            )
+        exported_threshold = metadata.get("chain_reliability_threshold")
+        if exported_mode == "adaptive" and exported_threshold is not None:
+            configured_threshold = config["model"].get(
+                "chain_reliability_threshold", 0.2
+            )
+            if float(exported_threshold) != float(configured_threshold):
+                raise ValueError("ONNX chain reliability threshold mismatch")
         fuse_logit = metadata.get("depth_fuse_logit")
         if model.head.depth_fuse_logit is not None:
             if fuse_logit is None:

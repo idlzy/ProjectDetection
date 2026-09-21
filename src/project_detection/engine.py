@@ -587,6 +587,7 @@ def train(config):
         config["model"].get("geometry"),
         config["data"]["classes"],
         config["train"].get("target_assignment_chunk_size", 8),
+        config["train"].get("uncertainty_loss_weight", 0.1),
     )
     training_step = DetectionTrainingStep(model, criterion)
     if world_size > 1:

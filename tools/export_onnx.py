@@ -87,6 +87,12 @@ def export_model(config, checkpoint, output, opset=13, overwrite=False):
         ),
         "probabilistic_depth": bool(config["model"]["probabilistic_depth"]),
         "geometric_depth": bool(config["model"].get("geometric_depth", False)),
+        "attribute_prediction_mode": config["model"].get(
+            "attribute_prediction_mode", "parallel"
+        ),
+        "chain_reliability_threshold": config["model"].get(
+            "chain_reliability_threshold", 0.2
+        ),
     }
     metadata_path.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",

@@ -21,12 +21,13 @@ def sigmoid_focal_loss(logits, targets, alpha=0.25, gamma=2.0, reduction="sum"):
 class FCOS3DLoss(nn.Module):
     def __init__(self, num_classes, strides, regress_ranges,
                  geometry_config=None, class_names=None,
-                 target_assignment_chunk_size=8):
+                 target_assignment_chunk_size=8, uncertainty_loss_weight=0.1):
         super().__init__()
         self.num_classes = num_classes
         self.strides = strides
         self.regress_ranges = regress_ranges
         self.target_assignment_chunk_size = int(target_assignment_chunk_size)
+        self.uncertainty_loss_weight = float(uncertainty_loss_weight)
         self.geometry = geometry_config or {}
         enabled_names = set(self.geometry.get("classes", class_names or []))
         self.geometry_class_ids = {
@@ -35,6 +36,20 @@ class FCOS3DLoss(nn.Module):
         }
 
     def forward(self, outputs, targets, head):
+        if getattr(head, "attribute_prediction_mode", "parallel") == "adaptive":
+            branch_losses = [
+                self._forward_single(
+                    [level[name] for level in outputs], targets, head
+                )
+                for name in ("parallel", "chain")
+            ]
+            return {
+                key: (branch_losses[0][key] + branch_losses[1][key]) / 2
+                for key in branch_losses[0]
+            }
+        return self._forward_single(outputs, targets, head)
+
+    def _forward_single(self, outputs, targets, head):
         loss_cls = outputs[0]["cls"].new_tensor(0.0)
         loss_offset = loss_cls.clone()
         loss_depth = loss_cls.clone()
@@ -43,6 +58,7 @@ class FCOS3DLoss(nn.Module):
         loss_depth_cls = loss_cls.clone()
         loss_dir = loss_cls.clone()
         loss_center = loss_cls.clone()
+        loss_uncertainty = loss_cls.clone()
         positives = loss_cls.new_zeros(())
         nodes_by_image = [[] for _ in targets]
         prepared_targets = prepare_target_batch(
@@ -100,6 +116,9 @@ class FCOS3DLoss(nn.Module):
                 geo_weight = None
                 if prediction.get("geo_weight") is not None:
                     geo_weight = prediction["geo_weight"][image_index].reshape(-1)[positive]
+                depth_log_scale = None
+                if prediction.get("depth_log_scale") is not None:
+                    depth_log_scale = prediction["depth_log_scale"][image_index].reshape(-1)[positive]
                 nodes_by_image[image_index].append({
                     "raw": raw,
                     "target": regression_target[positive],
@@ -109,6 +128,7 @@ class FCOS3DLoss(nn.Module):
                     "center_logits": prediction["centerness"][image_index].reshape(-1)[positive],
                     "depth_logits": depth_logits,
                     "geo_weight": geo_weight,
+                    "depth_log_scale": depth_log_scale,
                     "centers2d": points[positive] + raw[:, :2] * float(stride),
                     "class_probabilities": image_cls_logits[positive].sigmoid(),
                     "labels": labels[positive],
@@ -169,6 +189,14 @@ class FCOS3DLoss(nn.Module):
             box_loss = box_loss * center_target[:, None]
             loss_offset = loss_offset + box_loss[:, 0:2].sum()
             loss_depth = loss_depth + box_loss[:, 2].sum()
+            if chunks[0]["depth_log_scale"] is not None:
+                log_scale = torch.cat(
+                    [chunk["depth_log_scale"] for chunk in chunks]
+                ).float().clamp(-5.0, 5.0)
+                residual = (depth.float() - regression_target[:, 2].float()).abs()
+                loss_uncertainty = loss_uncertainty + (
+                    (2.0 ** 0.5) * residual * (-log_scale).exp() + log_scale
+                ).mul(center_target.float()).sum()
             loss_size = loss_size + box_loss[:, 3:6].sum()
             loss_yaw = loss_yaw + box_loss[:, 6].sum()
             if depth_logits is not None:
@@ -209,5 +237,9 @@ class FCOS3DLoss(nn.Module):
             "loss_direction": loss_dir / normalizer,
             "loss_centerness": loss_center / normalizer,
         }
+        if outputs[0].get("depth_log_scale") is not None:
+            losses["loss_uncertainty"] = (
+                self.uncertainty_loss_weight * loss_uncertainty / normalizer
+            )
         losses["loss_total"] = sum(losses.values())
         return losses
