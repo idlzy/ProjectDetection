@@ -88,7 +88,8 @@ class FCOS3DPostProcessor:
         for image_index in range(outputs[0]["cls"].shape[0]):
             raws, local_depths, depth_confidences = [], [], []
             centers, scores, labels, class_probabilities, geo_weights = [], [], [], [], []
-            for prediction, stride in zip(outputs, self.strides):
+            source_levels, level_candidate_counts = [], []
+            for level_index, (prediction, stride) in enumerate(zip(outputs, self.strides)):
                 cls = prediction["cls"][image_index].sigmoid()
                 center = prediction["centerness"][image_index].sigmoid()
                 combined = torch.sqrt(cls * center)
@@ -99,6 +100,7 @@ class FCOS3DPostProcessor:
                 flat_scores, flat_indices = combined.flatten().topk(min(self.nms_pre, combined.numel()))
                 keep = flat_scores >= self.score_threshold
                 flat_scores, flat_indices = flat_scores[keep], flat_indices[keep]
+                level_candidate_counts.append(int(flat_scores.numel()))
                 if not keep.any(): continue
                 height, width = cls.shape[-2:]
                 class_ids = flat_indices // (height * width)
@@ -128,9 +130,18 @@ class FCOS3DPostProcessor:
                 class_probabilities.append(cls_vectors)
                 if geo_weight is not None: geo_weights.append(geo_weight)
                 scores.append(flat_scores); labels.append(class_ids)
+                source_levels.append(torch.full_like(class_ids, level_index))
             if not scores:
                 device = outputs[0]["cls"].device
-                results.append({"boxes3d": torch.empty((0,9),device=device), "scores": torch.empty(0,device=device), "depth_confidence": torch.empty(0,device=device), "labels": torch.empty(0,dtype=torch.long,device=device)})
+                results.append({
+                    "boxes3d": torch.empty((0, 9), device=device),
+                    "scores": torch.empty(0, device=device),
+                    "depth_confidence": torch.empty(0, device=device),
+                    "labels": torch.empty(0, dtype=torch.long, device=device),
+                    "boxes2d": torch.empty((0, 4), device=device),
+                    "source_levels": torch.empty(0, dtype=torch.long, device=device),
+                    "level_candidate_counts": level_candidate_counts,
+                })
                 continue
             raw = torch.cat(raws)
             local_depth = torch.cat(local_depths)
@@ -138,6 +149,7 @@ class FCOS3DPostProcessor:
             centers2d = torch.cat(centers)
             class_vectors = torch.cat(class_probabilities)
             scores = torch.cat(scores); labels = torch.cat(labels)
+            source_levels = torch.cat(source_levels)
             geo_weight = torch.cat(geo_weights) if geo_weights else None
             geometric_depth = local_depth
             geometry_valid = torch.zeros_like(local_depth, dtype=torch.bool)
@@ -192,7 +204,15 @@ class FCOS3DPostProcessor:
                     pairwise_chunk_size=self.nms_pairwise_chunk_size,
                 )])
             kept = torch.cat(kept); kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
-            result = {"boxes3d": boxes3d[kept], "scores": scores[kept], "depth_confidence": depth_confidence[kept], "labels": labels[kept], "boxes2d": image_boxes[kept]}
+            result = {
+                "boxes3d": boxes3d[kept],
+                "scores": scores[kept],
+                "depth_confidence": depth_confidence[kept],
+                "labels": labels[kept],
+                "boxes2d": image_boxes[kept],
+                "source_levels": source_levels[kept],
+                "level_candidate_counts": level_candidate_counts,
+            }
             if geo_weight is not None:
                 result.update({
                     "depth_local": local_depth[kept],
@@ -218,7 +238,9 @@ class FCOS3DPostProcessor:
             image_boxes_by_level = []
             class_scores_by_level = []
             rank_scores_by_level = []
-            for prediction, stride in zip(outputs, self.strides):
+            source_levels_by_level = []
+            level_candidate_counts = []
+            for level_index, (prediction, stride) in enumerate(zip(outputs, self.strides)):
                 cls = prediction["cls"][image_index].sigmoid()
                 centerness = prediction["centerness"][image_index].sigmoid()
                 height, width = cls.shape[-2:]
@@ -303,17 +325,26 @@ class FCOS3DPostProcessor:
                 )
                 detection_scores = cls_scores * center_scores[:, None]
                 ranking_scores = detection_scores * depth_confidence[:, None]
+                level_candidate_counts.append(int(
+                    (detection_scores[:, sorted(self.evaluation_class_ids)]
+                     >= self.score_threshold).sum().item()
+                ))
                 boxes_by_level.append(boxes)
                 image_boxes_by_level.append(image_boxes)
                 class_scores_by_level.append(detection_scores)
                 rank_scores_by_level.append(ranking_scores)
+                source_levels_by_level.append(torch.full(
+                    (boxes.shape[0],), level_index, dtype=torch.long,
+                    device=boxes.device,
+                ))
 
             all_boxes = torch.cat(boxes_by_level)
             all_image_boxes = torch.cat(image_boxes_by_level)
             all_scores = torch.cat(class_scores_by_level)
             all_rank_scores = torch.cat(rank_scores_by_level)
+            all_source_levels = torch.cat(source_levels_by_level)
             kept_boxes, kept_image_boxes = [], []
-            kept_scores, kept_labels, kept_rank = [], [], []
+            kept_scores, kept_labels, kept_rank, kept_source_levels = [], [], [], []
             for label in sorted(self.evaluation_class_ids):
                 valid = all_scores[:, label] >= self.score_threshold
                 if not valid.any():
@@ -332,6 +363,7 @@ class FCOS3DPostProcessor:
                 kept_image_boxes.append(label_image_boxes[keep])
                 kept_scores.append(label_scores[keep])
                 kept_rank.append(label_rank[keep])
+                kept_source_levels.append(all_source_levels[valid][keep])
                 kept_labels.append(
                     torch.full(
                         (keep.numel(),), label, dtype=torch.long,
@@ -347,6 +379,10 @@ class FCOS3DPostProcessor:
                             0, dtype=torch.long, device=all_boxes.device
                         ),
                         "boxes2d": all_boxes.new_empty((0, 4)),
+                        "source_levels": torch.empty(
+                            0, dtype=torch.long, device=all_boxes.device
+                        ),
+                        "level_candidate_counts": level_candidate_counts,
                     }
                 )
                 continue
@@ -355,6 +391,7 @@ class FCOS3DPostProcessor:
             scores = torch.cat(kept_scores)
             labels = torch.cat(kept_labels)
             ranking = torch.cat(kept_rank)
+            source_levels = torch.cat(kept_source_levels)
             order = ranking.argsort(descending=True)[: self.max_per_image]
             results.append(
                 {
@@ -362,6 +399,8 @@ class FCOS3DPostProcessor:
                     "scores": scores[order],
                     "labels": labels[order],
                     "boxes2d": image_boxes[order],
+                    "source_levels": source_levels[order],
+                    "level_candidate_counts": level_candidate_counts,
                 }
             )
         return results

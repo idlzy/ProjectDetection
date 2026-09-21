@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import cv2
@@ -40,6 +41,92 @@ def bev_path_for(camera_path: Path):
     if stem.endswith("_pred"):
         stem = stem[:-5]
     return camera_path.with_name(stem + "_bev" + camera_path.suffix)
+
+
+def head_report_path(camera_path: Path):
+    return camera_path.with_name(camera_path.stem + "_heads.json")
+
+
+def _tensor_value(result, key, index):
+    value = result.get(key)
+    if value is None:
+        return None
+    item = value[index].detach().cpu()
+    if item.ndim == 0:
+        if item.dtype == torch.bool:
+            return bool(item.item())
+        return float(item.item())
+    return [float(number) for number in item.tolist()]
+
+
+def build_head_report(result, class_names, strides, scale_factor=1.0):
+    source_levels = result.get("source_levels")
+    if source_levels is None:
+        source_levels = torch.full_like(result["labels"], -1)
+    source_levels = source_levels.detach().cpu()
+    candidate_counts = result.get("level_candidate_counts", [])
+    heads = []
+    for level_index, stride in enumerate(strides):
+        indices = torch.where(source_levels == level_index)[0].tolist()
+        detections = []
+        for index in indices:
+            class_id = int(result["labels"][index].item())
+            box3d = _tensor_value(result, "boxes3d", index)
+            bbox2d = _tensor_value(result, "boxes2d", index)
+            item = {
+                "detection_index": int(index),
+                "class_id": class_id,
+                "class_name": class_names[class_id],
+                "score": _tensor_value(result, "scores", index),
+                "bbox2d_model_input_xyxy": bbox2d,
+                "bbox2d_original_image_xyxy": [
+                    value / float(scale_factor) for value in bbox2d
+                ],
+                "center_xyz": box3d[:3],
+                "dimensions_lhw": box3d[3:6],
+                "yaw": box3d[6],
+                "velocity_xz": box3d[7:9],
+            }
+            for key in (
+                "depth_confidence", "depth_local", "depth_geometric",
+                "depth_fusion_weight", "geometry_valid",
+            ):
+                value = _tensor_value(result, key, index)
+                if value is not None:
+                    item[key] = value
+            detections.append(item)
+        heads.append({
+            "level_index": level_index,
+            "head_name": "P%d" % (level_index + 3),
+            "stride": int(stride),
+            "candidates_after_threshold": (
+                int(candidate_counts[level_index])
+                if level_index < len(candidate_counts) else None
+            ),
+            "detections_after_nms": len(detections),
+            "detections": detections,
+        })
+    return {
+        "candidate_stage": "per-level nms_pre and score-threshold filtering",
+        "detection_stage": "cross-level class-wise rotated BEV NMS and max_per_image",
+        "total_detections_after_nms": int(len(result["scores"])),
+        "heads": heads,
+    }
+
+
+def print_head_report(report):
+    print("Detection head details:")
+    for head in report["heads"]:
+        print(
+            "  %s stride=%d candidates_after_threshold=%s detections_after_nms=%d"
+            % (
+                head["head_name"], head["stride"],
+                head["candidates_after_threshold"],
+                head["detections_after_nms"],
+            )
+        )
+        for detection in head["detections"]:
+            print("    " + json.dumps(detection, ensure_ascii=False))
 
 
 def output_paths(image_path, input_path, output, multiple):
@@ -189,6 +276,26 @@ def main():
             )
             if not cv2.imwrite(str(bev_path), bev):
                 raise OSError("Cannot write BEV visualization: %s" % bev_path)
+
+        if not multiple:
+            report = build_head_report(
+                result, config["data"]["classes"], config["model"]["strides"],
+                target["scale_factor"],
+            )
+            report.update({
+                "image": str(image_path),
+                "checkpoint": str(Path(args.checkpoint)),
+                "score_threshold": config["evaluation"]["score_threshold"],
+                "nms_pre": config["evaluation"]["nms_pre"],
+                "nms_threshold": config["evaluation"]["nms_threshold"],
+                "max_per_image": config["evaluation"]["max_per_image"],
+            })
+            details_path = head_report_path(camera_path)
+            details_path.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            print_head_report(report)
+            print("Detection head JSON: %s" % details_path)
 
         print(
             "[%d/%d] %s -> %s%s boxes=%d"
