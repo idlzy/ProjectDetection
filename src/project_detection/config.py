@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
@@ -111,6 +112,48 @@ def validate_config(config: Dict[str, Any]) -> None:
     nms_chunk_size = config["evaluation"].get("nms_pairwise_chunk_size", 32)
     if not isinstance(nms_chunk_size, int) or isinstance(nms_chunk_size, bool) or nms_chunk_size < 1:
         raise ValueError("evaluation.nms_pairwise_chunk_size must be a positive integer")
+    nms_max_candidates = config["evaluation"].get("nms_max_candidates", 1000)
+    if (
+        not isinstance(nms_max_candidates, int)
+        or isinstance(nms_max_candidates, bool)
+        or nms_max_candidates < 1
+        or nms_max_candidates > 1000
+    ):
+        raise ValueError(
+            "evaluation.nms_max_candidates must be an integer in [1, 1000]"
+        )
+    valid_ranges = (
+        ("min_valid_depth", "max_valid_depth", 0.1, 1000.0),
+        ("min_valid_dimension", "max_valid_dimension", 1e-3, 100.0),
+    )
+    for minimum_key, maximum_key, minimum_default, maximum_default in valid_ranges:
+        minimum = config["evaluation"].get(minimum_key, minimum_default)
+        maximum = config["evaluation"].get(maximum_key, maximum_default)
+        if (
+            not isinstance(minimum, (int, float))
+            or isinstance(minimum, bool)
+            or not isinstance(maximum, (int, float))
+            or isinstance(maximum, bool)
+            or not math.isfinite(float(minimum))
+            or not math.isfinite(float(maximum))
+            or not 0 < minimum < maximum
+        ):
+            raise ValueError(
+                "evaluation.%s and evaluation.%s must satisfy 0 < min < max"
+                % (minimum_key, maximum_key)
+            )
+    for key, default in (
+        ("max_abs_position", 1000.0),
+        ("max_abs_yaw", 100.0 * 3.141592653589793),
+    ):
+        value = config["evaluation"].get(key, default)
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or value <= 0
+        ):
+            raise ValueError("evaluation.%s must be positive" % key)
     nms_mode = config["evaluation"].get("nms_mode", "global")
     if nms_mode not in ("global", "class"):
         raise ValueError("evaluation.nms_mode must be global or class")
@@ -153,6 +196,13 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("evaluation.depth_bins must contain increasing [min, max] pairs")
     if config["train"].get("validate_every", 1) < 1:
         raise ValueError("train.validate_every must be at least 1")
+    val_log_every = config["runtime"].get("val_log_every", 10)
+    if (
+        not isinstance(val_log_every, int)
+        or isinstance(val_log_every, bool)
+        or val_log_every < 1
+    ):
+        raise ValueError("runtime.val_log_every must be a positive integer")
     pretrain = config["train"].get("pretrain")
     resume = config["train"].get("resume")
     if pretrain and resume:

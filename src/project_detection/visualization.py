@@ -231,9 +231,14 @@ def draw_bev(
     x_limit, z_limit = 40.0, 80.0
 
     def project(points):
+        points = np.asarray(points, dtype=np.float64)
+        if points.ndim != 2 or points.shape[1] != 2:
+            return None
         pixels = np.empty_like(points)
         pixels[:, 0] = width / 2 + points[:, 0] / x_limit * (width / 2 - 30)
         pixels[:, 1] = height - 30 - points[:, 1] / z_limit * (height - 60)
+        if not np.isfinite(pixels).all() or np.abs(pixels).max() > 1e6:
+            return None
         return pixels.round().astype(np.int32)
 
     for distance in range(10, 81, 10):
@@ -260,9 +265,12 @@ def draw_bev(
     if draw_ground_truth:
         for box in target.get("boxes3d", []):
             box = box.cpu().numpy() if hasattr(box, "cpu") else np.asarray(box)
+            points = project(bev_corners(box))
+            if points is None:
+                continue
             cv2.polylines(
                 canvas,
-                [project(bev_corners(box))],
+                [points],
                 True,
                 GROUND_TRUTH_COLOR,
                 2,
@@ -274,6 +282,8 @@ def draw_bev(
         result["labels"][:max_detections].cpu().numpy(),
     )):
         points = project(bev_corners(box))
+        if points is None or not np.isfinite(score):
+            continue
         color = color_for_class(int(label))
         cv2.polylines(canvas, [points], True, color, 2)
         cv2.putText(

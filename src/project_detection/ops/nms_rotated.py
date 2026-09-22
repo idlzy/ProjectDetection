@@ -14,6 +14,8 @@ _GPU_SUPPRESSION_BUDGET_BYTES = 128 * 1024 * 1024
 _PAIRWISE_TEMPORARY_BUDGET_BYTES = 256 * 1024 * 1024
 _CUDA_FREE_MEMORY_RESERVE_BYTES = 256 * 1024 * 1024
 _ESTIMATED_PAIRWISE_BYTES_PER_PAIR = 2048
+_MAX_NMS_CANDIDATES = 1000
+_MAX_BOUNDED_FALLBACK_CANDIDATES = 512
 
 
 class _BoxGeometry(NamedTuple):
@@ -219,13 +221,25 @@ def _greedy_keep_from_suppression(suppression):
     return kept_sorted
 
 
-def _format_nms_result(boxes, scores, order, kept_sorted):
+def _format_nms_result(
+    boxes, scores, order, kept_sorted, candidate_indices=None
+):
     kept_sorted = torch.as_tensor(
         kept_sorted, dtype=torch.long, device=boxes.device
     )
     keep = order[kept_sorted]
+    if candidate_indices is not None:
+        keep = candidate_indices[keep]
     dets = torch.cat((boxes[keep], scores[keep, None].to(boxes.dtype)), dim=1)
     return dets, keep
+
+
+def _limit_sorted_candidates(scores, limit):
+    """Return score-sorted candidate indices and the number discarded."""
+    order = scores.argsort(descending=True)
+    if order.numel() <= limit:
+        return order, 0
+    return order[:limit], order.numel() - limit
 
 
 def _bounded_greedy_nms(geometry, threshold):
@@ -269,16 +283,52 @@ def nms_rotated(
             torch.empty(0, dtype=torch.long, device=boxes.device),
         )
 
+    candidate_indices, discarded = _limit_sorted_candidates(
+        scores, _MAX_NMS_CANDIDATES
+    )
+    if discarded:
+        warnings.warn(
+            "rotated NMS received %d candidates; keeping the top %d to "
+            "bound exact-IoU work" % (count, _MAX_NMS_CANDIDATES),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    candidate_boxes = boxes[candidate_indices]
+    candidate_scores = scores[candidate_indices]
     threshold = float(iou_threshold)
-    order = scores.argsort(descending=True)
-    sorted_boxes = boxes[order].float().contiguous()
+    order = candidate_scores.argsort(descending=True)
+    sorted_boxes = candidate_boxes[order].float().contiguous()
+    count = sorted_boxes.shape[0]
     geometry = _precompute_box_geometry(sorted_boxes, clockwise)
     suppression_bytes = count * count
     suppression_budget = _effective_suppression_budget(boxes.device)
 
     if suppression_bytes > suppression_budget:
+        if count > _MAX_BOUNDED_FALLBACK_CANDIDATES:
+            warnings.warn(
+                "rotated NMS CUDA workspace is below the matrix budget; "
+                "keeping the top %d of %d candidates before the exact "
+                "bounded-memory fallback"
+                % (_MAX_BOUNDED_FALLBACK_CANDIDATES, count),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            order = order[:_MAX_BOUNDED_FALLBACK_CANDIDATES]
+            geometry = _precompute_box_geometry(
+                candidate_boxes[order].float().contiguous(), clockwise
+            )
+        else:
+            warnings.warn(
+                "rotated NMS CUDA workspace is below the matrix budget; "
+                "using the exact bounded-memory fallback for %d candidates"
+                % count,
+                RuntimeWarning,
+                stacklevel=2,
+            )
         kept_sorted = _bounded_greedy_nms(geometry, threshold)
-        return _format_nms_result(boxes, scores, order, kept_sorted)
+        return _format_nms_result(
+            boxes, scores, order, kept_sorted, candidate_indices
+        )
 
     try:
         suppression = torch.zeros(
@@ -317,8 +367,23 @@ def nms_rotated(
         if "iou" in locals():
             del iou
         torch.cuda.empty_cache()
+        if count > _MAX_BOUNDED_FALLBACK_CANDIDATES:
+            warnings.warn(
+                "rotated NMS fallback is limiting candidates from %d to %d"
+                % (count, _MAX_BOUNDED_FALLBACK_CANDIDATES),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            order = order[:_MAX_BOUNDED_FALLBACK_CANDIDATES]
+            geometry = _precompute_box_geometry(
+                candidate_boxes[order].float().contiguous(), clockwise
+            )
         kept_sorted = _bounded_greedy_nms(geometry, threshold)
-        return _format_nms_result(boxes, scores, order, kept_sorted)
+        return _format_nms_result(
+            boxes, scores, order, kept_sorted, candidate_indices
+        )
 
     kept_sorted = _greedy_keep_from_suppression(suppression_cpu)
-    return _format_nms_result(boxes, scores, order, kept_sorted)
+    return _format_nms_result(
+        boxes, scores, order, kept_sorted, candidate_indices
+    )

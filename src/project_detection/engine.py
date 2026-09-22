@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import faulthandler
+import logging
 import math
 import os
 import random
@@ -23,7 +24,11 @@ from .data import (
     Mw3dReadyDataset,
     collate_detection_batch,
 )
-from .logging_utils import configure_training_logging, log_runtime_environment
+from .logging_utils import (
+    LOGGER_NAME,
+    configure_training_logging,
+    log_runtime_environment,
+)
 from .metrics import Mw3dMetric
 from .models import build_model
 from .task import FCOS3DLoss, FCOS3DPostProcessor
@@ -273,8 +278,58 @@ def _json_value(value):
     return value
 
 
+def _current_rss_gb():
+    """Read current resident memory without an optional psutil dependency."""
+    try:
+        with open("/proc/self/statm", "r", encoding="ascii") as handle:
+            resident_pages = int(handle.read().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE") / (1024 ** 3)
+    except (OSError, ValueError, IndexError):
+        return float("nan")
+
+
+def _postprocess_batch_stats(results):
+    keys = (
+        "candidates_thresholded",
+        "invalid_before_decode",
+        "invalid_after_decode",
+        "nms_input",
+        "nms_truncated",
+        "nms_output",
+        "nms_seconds",
+    )
+    return {
+        key: sum(result.get("postprocess_stats", {}).get(key, 0) for result in results)
+        for key in keys
+    }
+
+
+def _sample_tokens(targets):
+    return [
+        str(target.get("sample_token", target.get("image_path", "unknown")))
+        for target in targets
+    ]
+
+
+def _evaluation_logger(logger=None):
+    if logger is not None:
+        return logger
+    logger = logging.getLogger(LOGGER_NAME)
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logger.addHandler(handler)
+    return logger
+
+
 @torch.no_grad()
-def evaluate(model, loader, config, device):
+def evaluate(model, loader, config, device, logger=None):
+    logger = _evaluation_logger(logger)
     model.eval(); raw_model = model.module if hasattr(model, "module") else model
     processor = FCOS3DPostProcessor(raw_model, config)
     evaluation = config["evaluation"]
@@ -288,12 +343,105 @@ def evaluate(model, loader, config, device):
         depth_bins=evaluation.get("depth_bins"),
         evaluated_classes=evaluation.get("classes"),
     )
-    for images, targets in loader:
-        images = images.to(device, non_blocking=True)
+    log_every = config["runtime"].get("val_log_every", 10)
+    batch_finished = time.perf_counter()
+    for step, (images, targets) in enumerate(loader):
+        batch_started = time.perf_counter()
+        data_seconds = batch_started - batch_finished
         # Run the unwrapped module during validation. DDP forward may perform
         # buffer collectives, which would deadlock when the no-padding eval
         # sampler gives ranks different batch counts.
-        metric.update(processor(raw_model(images), targets), targets)
+        if device.type == "cuda":
+            timing_events = [
+                torch.cuda.Event(enable_timing=True) for _ in range(4)
+            ]
+            timing_events[0].record()
+            images = images.to(device, non_blocking=True)
+            timing_events[1].record()
+            outputs = raw_model(images)
+            timing_events[2].record()
+            results = processor(outputs, targets)
+            timing_events[3].record()
+            timing_events[3].synchronize()
+            transfer_seconds = timing_events[0].elapsed_time(timing_events[1]) / 1000.0
+            forward_seconds = timing_events[1].elapsed_time(timing_events[2]) / 1000.0
+            postprocess_seconds = timing_events[2].elapsed_time(timing_events[3]) / 1000.0
+        else:
+            transfer_started = time.perf_counter()
+            images = images.to(device, non_blocking=True)
+            transfer_seconds = time.perf_counter() - transfer_started
+            forward_started = time.perf_counter()
+            outputs = raw_model(images)
+            forward_seconds = time.perf_counter() - forward_started
+            postprocess_started = time.perf_counter()
+            results = processor(outputs, targets)
+            postprocess_seconds = time.perf_counter() - postprocess_started
+        metric_started = time.perf_counter()
+        metric.update(results, targets)
+        metric_seconds = time.perf_counter() - metric_started
+        stats = _postprocess_batch_stats(results)
+        tokens = _sample_tokens(targets)
+        invalid_count = (
+            stats["invalid_before_decode"] + stats["invalid_after_decode"]
+        )
+        if invalid_count:
+            logger.warning(
+                "Validation invalid candidates | batch=%d/%d | samples=%s | "
+                "before_decode=%d after_decode=%d",
+                step + 1,
+                len(loader),
+                tokens,
+                stats["invalid_before_decode"],
+                stats["invalid_after_decode"],
+            )
+        if stats["nms_truncated"]:
+            logger.warning(
+                "Validation NMS candidates truncated | batch=%d/%d | "
+                "samples=%s | nms_input=%d truncated=%d",
+                step + 1,
+                len(loader),
+                tokens,
+                stats["nms_input"],
+                stats["nms_truncated"],
+            )
+        should_log = (
+            step % log_every == 0 or step + 1 == len(loader)
+        )
+        if should_log:
+            gpu_memory = ""
+            if device.type == "cuda":
+                gpu_memory = (
+                    " gpu_allocated=%.2fGB gpu_reserved=%.2fGB"
+                    % (
+                        torch.cuda.memory_allocated(device) / (1024 ** 3),
+                        torch.cuda.memory_reserved(device) / (1024 ** 3),
+                    )
+                )
+            logger.info(
+                "Validation progress | batch=%d/%d samples=%s | "
+                "seconds[data=%.3f transfer=%.3f forward=%.3f "
+                "postprocess=%.3f nms=%.3f metric=%.3f total=%.3f] | "
+                "candidates=%d invalid=%d nms_input=%d nms_truncated=%d "
+                "nms_output=%d rss=%.2fGB%s",
+                step + 1,
+                len(loader),
+                tokens,
+                data_seconds,
+                transfer_seconds,
+                forward_seconds,
+                postprocess_seconds,
+                stats["nms_seconds"],
+                metric_seconds,
+                time.perf_counter() - batch_started,
+                stats["candidates_thresholded"],
+                invalid_count,
+                stats["nms_input"],
+                stats["nms_truncated"],
+                stats["nms_output"],
+                _current_rss_gb(),
+                gpu_memory,
+            )
+        batch_finished = time.perf_counter()
     states = distributed_utils.gather_object_to_main(metric.state_dict())
     if not distributed_utils.is_main_process():
         return None
@@ -857,7 +1005,7 @@ def train(config):
             if should_validate:
                 validation_started = time.time()
                 if rank == 0: logger.info("Validation started | epoch=%d", epoch + 1)
-                metrics = evaluate(model, val_loader, config, device)
+                metrics = evaluate(model, val_loader, config, device, logger=logger)
                 is_new_best = False
                 if rank == 0:
                     summary_keys = (
