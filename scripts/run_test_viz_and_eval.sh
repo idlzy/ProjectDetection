@@ -73,6 +73,9 @@ RUN_DIR="${RUN_DIR:-outputs/test_runs/${TAG}}"
 VIZ_DIR="${VIZ_DIR:-${RUN_DIR}/visualizations}"
 METRIC_JSON="${METRIC_JSON:-${RUN_DIR}/metrics.json}"
 PLOT_DIR="${PLOT_DIR:-${RUN_DIR}/plots}"
+HEAD_LEVEL_STATS="${HEAD_LEVEL_STATS:-1}"
+COP_STATS="${COP_STATS:-1}"
+COP_ABLATION="${COP_ABLATION:-1}"
 
 if [[ -z "${CHECKPOINT}" ]]; then
     echo "[mw3d-test] ERROR: set CHECKPOINT=/path/to/best.pth" >&2
@@ -95,6 +98,8 @@ echo "[mw3d-test] device=${DEVICE_ID}"
 echo "[mw3d-test] visualizations=${VIZ_DIR}"
 echo "[mw3d-test] metric_json=${METRIC_JSON}"
 echo "[mw3d-test] plots=${PLOT_DIR}"
+echo "[mw3d-test] head_level_stats=${HEAD_LEVEL_STATS}"
+echo "[mw3d-test] cop_stats=${COP_STATS} cop_ablation=${COP_ABLATION}"
 if [[ -n "${EVAL_CLASSES}" ]]; then
     echo "[mw3d-test] evaluated classes=${EVAL_CLASSES}"
 fi
@@ -149,6 +154,15 @@ if [[ "${SKIP_EVAL:-0}" != "1" ]]; then
         --plot-dir "${PLOT_DIR}"
         --set "evaluation.score_threshold=${EVAL_SCORE_THR}"
     )
+    if [[ "${HEAD_LEVEL_STATS}" == "1" ]]; then
+        eval_args+=(--head-level-stats)
+    fi
+    if [[ "${COP_STATS}" == "1" ]]; then
+        eval_args+=(--cop-stats)
+    fi
+    if [[ "${COP_ABLATION}" == "1" ]]; then
+        eval_args+=(--cop-ablation)
+    fi
     if [[ -n "${DATA_ROOT}" ]]; then
         eval_args+=(--set "data.data_root=${DATA_ROOT}")
     fi

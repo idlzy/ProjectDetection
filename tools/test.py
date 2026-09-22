@@ -26,9 +26,24 @@ def main():
     parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--output", help="Write the complete test report JSON here")
     parser.add_argument("--plot-dir", help="Write metric JSON/PNG plots here")
+    parser.add_argument(
+        "--head-level-stats", action="store_true",
+        help="Report P3-P7 contribution metrics and confusion matrices",
+    )
+    parser.add_argument(
+        "--cop-stats", action="store_true",
+        help="Report adaptive CoP branch-selection statistics",
+    )
+    parser.add_argument(
+        "--cop-ablation", action="store_true",
+        help="Compare adaptive, parallel and chain branches from one forward pass",
+    )
     parser.add_argument("--set", action="append", default=[], dest="overrides")
     args = parser.parse_args()
     config = load_config(args.config, args.overrides)
+    config["evaluation"]["head_level_stats"] = args.head_level_stats
+    config["evaluation"]["cop_stats"] = args.cop_stats
+    config["evaluation"]["cop_ablation"] = args.cop_ablation
     metrics = evaluate_checkpoint(config, args.checkpoint, args.split)
     if args.output or args.plot_dir:
         experiment_dir = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"]
@@ -48,6 +63,9 @@ def main():
             "split_manifest_sha256": sha256_file(split_manifest),
             "score_threshold": config["evaluation"]["score_threshold"],
             "distance_thresholds": config["evaluation"]["distance_thresholds"],
+            "head_level_stats": args.head_level_stats,
+            "cop_stats": args.cop_stats,
+            "cop_ablation": args.cop_ablation,
         }
         if args.split == "test":
             metadata["test_manifest"] = metadata["split_manifest"]

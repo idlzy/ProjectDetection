@@ -191,10 +191,14 @@ class FCOS3DPostProcessor:
                 "nms_truncated": 0,
                 "nms_output": 0,
                 "nms_seconds": 0.0,
+                "cop_thresholded_by_level": [],
+                "cop_valid_by_level": [],
+                "cop_final_by_level": [],
             }
             raws, local_depths, depth_confidences = [], [], []
             centers, scores, labels, class_probabilities, geo_weights = [], [], [], [], []
             source_levels, level_candidate_counts = [], []
+            chain_selections, parallel_log_scales, chain_log_scales = [], [], []
             for level_index, (prediction, stride) in enumerate(zip(outputs, self.strides)):
                 cls = prediction["cls"][image_index].sigmoid()
                 center = prediction["centerness"][image_index].sigmoid()
@@ -211,6 +215,20 @@ class FCOS3DPostProcessor:
                 height, width = cls.shape[-2:]
                 class_ids = flat_indices // (height * width)
                 locations = flat_indices % (height * width)
+                chain_selected = prediction.get("chain_selected")
+                if chain_selected is not None:
+                    chain_selected = chain_selected[image_index].reshape(-1)[locations]
+                    parallel_log_scale = prediction["parallel"]["depth_log_scale"][
+                        image_index
+                    ].reshape(-1)[locations]
+                    chain_log_scale = prediction["chain"]["depth_log_scale"][
+                        image_index
+                    ].reshape(-1)[locations]
+                    stats["cop_thresholded_by_level"].append({
+                        "level": level_index,
+                        "total": int(chain_selected.numel()),
+                        "chain": int(chain_selected.sum().item()),
+                    })
                 bbox_channels = prediction["bbox"].shape[1]
                 raw = (
                     prediction["bbox"][image_index]
@@ -237,6 +255,10 @@ class FCOS3DPostProcessor:
                 if geo_weight is not None: geo_weights.append(geo_weight)
                 scores.append(flat_scores); labels.append(class_ids)
                 source_levels.append(torch.full_like(class_ids, level_index))
+                if chain_selected is not None:
+                    chain_selections.append(chain_selected)
+                    parallel_log_scales.append(parallel_log_scale)
+                    chain_log_scales.append(chain_log_scale)
             if not scores:
                 device = outputs[0]["cls"].device
                 reference = torch.empty(0, device=device)
@@ -252,6 +274,15 @@ class FCOS3DPostProcessor:
             scores = torch.cat(scores); labels = torch.cat(labels)
             source_levels = torch.cat(source_levels)
             geo_weight = torch.cat(geo_weights) if geo_weights else None
+            chain_selected = (
+                torch.cat(chain_selections) if chain_selections else None
+            )
+            parallel_log_scale = (
+                torch.cat(parallel_log_scales) if parallel_log_scales else None
+            )
+            chain_log_scale = (
+                torch.cat(chain_log_scales) if chain_log_scales else None
+            )
             stats["candidates_thresholded"] = int(scores.numel())
 
             min_dimension_log = math.log(self.min_dimension)
@@ -287,6 +318,9 @@ class FCOS3DPostProcessor:
                     "labels": labels,
                     "source_levels": source_levels,
                     "geo_weight": geo_weight,
+                    "chain_selected": chain_selected,
+                    "parallel_log_scale": parallel_log_scale,
+                    "chain_log_scale": chain_log_scale,
                 },
                 selected,
             )
@@ -299,6 +333,9 @@ class FCOS3DPostProcessor:
             labels = selected_values["labels"]
             source_levels = selected_values["source_levels"]
             geo_weight = selected_values["geo_weight"]
+            chain_selected = selected_values["chain_selected"]
+            parallel_log_scale = selected_values["parallel_log_scale"]
+            chain_log_scale = selected_values["chain_log_scale"]
             geometric_depth = local_depth
             geometry_valid = torch.zeros_like(local_depth, dtype=torch.bool)
             target_meta = targets[image_index]
@@ -364,6 +401,9 @@ class FCOS3DPostProcessor:
                     "geometric_depth": geometric_depth,
                     "geometry_valid": geometry_valid,
                     "geo_weight": geo_weight,
+                    "chain_selected": chain_selected,
+                    "parallel_log_scale": parallel_log_scale,
+                    "chain_log_scale": chain_log_scale,
                 },
                 selected,
             )
@@ -377,9 +417,28 @@ class FCOS3DPostProcessor:
             geometric_depth = selected_values["geometric_depth"]
             geometry_valid = selected_values["geometry_valid"]
             geo_weight = selected_values["geo_weight"]
+            chain_selected = selected_values["chain_selected"]
+            parallel_log_scale = selected_values["parallel_log_scale"]
+            chain_log_scale = selected_values["chain_log_scale"]
+            if chain_selected is not None:
+                for level_index in range(len(self.strides)):
+                    level_mask = source_levels == level_index
+                    stats["cop_valid_by_level"].append({
+                        "level": level_index,
+                        "total": int(level_mask.sum().item()),
+                        "chain": int(chain_selected[level_mask].sum().item()),
+                    })
             kept, nms_stats = self._nms(boxes3d, scores, labels)
             stats.update(nms_stats)
             kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
+            if chain_selected is not None:
+                for level_index in range(len(self.strides)):
+                    level_mask = source_levels[kept] == level_index
+                    stats["cop_final_by_level"].append({
+                        "level": level_index,
+                        "total": int(level_mask.sum().item()),
+                        "chain": int(chain_selected[kept][level_mask].sum().item()),
+                    })
             result = {
                 "boxes3d": boxes3d[kept],
                 "scores": scores[kept],
@@ -396,6 +455,12 @@ class FCOS3DPostProcessor:
                     "depth_geometric": geometric_depth[kept],
                     "depth_fusion_weight": geo_weight[kept].sigmoid(),
                     "geometry_valid": geometry_valid[kept],
+                })
+            if chain_selected is not None:
+                result.update({
+                    "cop_chain_selected": chain_selected[kept],
+                    "cop_parallel_log_scale": parallel_log_scale[kept],
+                    "cop_chain_log_scale": chain_log_scale[kept],
                 })
             results.append(result)
         return results

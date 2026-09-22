@@ -327,13 +327,9 @@ def _evaluation_logger(logger=None):
     return logger
 
 
-@torch.no_grad()
-def evaluate(model, loader, config, device, logger=None):
-    logger = _evaluation_logger(logger)
-    model.eval(); raw_model = model.module if hasattr(model, "module") else model
-    processor = FCOS3DPostProcessor(raw_model, config)
+def _build_metric(config):
     evaluation = config["evaluation"]
-    metric = Mw3dMetric(
+    return Mw3dMetric(
         config["data"]["classes"],
         evaluation["distance_thresholds"],
         tp_distance_threshold=evaluation.get("tp_distance_threshold", 2.0),
@@ -343,6 +339,146 @@ def evaluate(model, loader, config, device, logger=None):
         depth_bins=evaluation.get("depth_bins"),
         evaluated_classes=evaluation.get("classes"),
     )
+
+
+def _predictions_from_level(results, level_index):
+    filtered = []
+    for result in results:
+        mask = result["source_levels"] == level_index
+        filtered.append({
+            "boxes3d": result["boxes3d"][mask],
+            "scores": result["scores"][mask],
+            "labels": result["labels"][mask],
+        })
+    return filtered
+
+
+def _cop_state(config):
+    return {
+        "stages": {
+            stage: [
+                {
+                    "level": index,
+                    "name": "P%d" % (index + 3),
+                    "stride": stride,
+                    "total": 0,
+                    "chain": 0,
+                }
+                for index, stride in enumerate(config["model"]["strides"])
+            ]
+            for stage in ("thresholded", "valid", "final")
+        },
+        "by_class": {
+            name: {"total": 0, "chain": 0}
+            for name in config["data"]["classes"]
+        },
+        "by_depth": {
+            ("%g-%gm" % (lower, upper) if upper < 1000000 else "%gm+" % lower):
+            {"total": 0, "chain": 0}
+            for lower, upper in config["evaluation"].get("depth_bins", [])
+        },
+        "uncertainty": {
+            name: {"count": 0, "sum": 0.0, "sum_sq": 0.0, "hist": [0] * 50}
+            for name in ("parallel", "chain")
+        },
+    }
+
+
+def _update_cop_state(state, results, config):
+    class_names = config["data"]["classes"]
+    depth_bins = config["evaluation"].get("depth_bins", [])
+    for result in results:
+        stats = result.get("postprocess_stats", {})
+        for stage in ("thresholded", "valid", "final"):
+            for row in stats.get("cop_%s_by_level" % stage, []):
+                level = int(row["level"])
+                state["stages"][stage][level]["total"] += int(row["total"])
+                state["stages"][stage][level]["chain"] += int(row["chain"])
+        selected = result.get("cop_chain_selected")
+        if selected is None:
+            continue
+        selected = selected.detach().cpu().numpy().astype(bool)
+        labels = result["labels"].detach().cpu().numpy()
+        depths = result["boxes3d"][:, 2].detach().cpu().numpy()
+        for class_id, class_name in enumerate(class_names):
+            mask = labels == class_id
+            state["by_class"][class_name]["total"] += int(mask.sum())
+            state["by_class"][class_name]["chain"] += int(selected[mask].sum())
+        for lower, upper in depth_bins:
+            label = "%g-%gm" % (lower, upper) if upper < 1000000 else "%gm+" % lower
+            mask = (depths >= lower) & (depths < upper)
+            state["by_depth"][label]["total"] += int(mask.sum())
+            state["by_depth"][label]["chain"] += int(selected[mask].sum())
+        for branch, key in (
+            ("parallel", "cop_parallel_log_scale"),
+            ("chain", "cop_chain_log_scale"),
+        ):
+            values = result[key].detach().float().cpu().numpy()
+            values = values[np.isfinite(values)]
+            bucket = state["uncertainty"][branch]
+            bucket["count"] += int(values.size)
+            bucket["sum"] += float(values.sum())
+            bucket["sum_sq"] += float(np.square(values).sum())
+            histogram, _ = np.histogram(values, bins=50, range=(-5.0, 5.0))
+            bucket["hist"] = [
+                left + int(right)
+                for left, right in zip(bucket["hist"], histogram)
+            ]
+
+
+def _merge_cop_states(states):
+    merged = states[0]
+    for state in states[1:]:
+        for stage, rows in state["stages"].items():
+            for index, row in enumerate(rows):
+                for key in ("total", "chain"):
+                    merged["stages"][stage][index][key] += row[key]
+        for group in ("by_class", "by_depth"):
+            for name, row in state[group].items():
+                for key in ("total", "chain"):
+                    merged[group][name][key] += row[key]
+        for branch, row in state["uncertainty"].items():
+            target = merged["uncertainty"][branch]
+            for key in ("count", "sum", "sum_sq"):
+                target[key] += row[key]
+            target["hist"] = [
+                left + right for left, right in zip(target["hist"], row["hist"])
+            ]
+    for rows in merged["stages"].values():
+        for row in rows:
+            row["chain_ratio"] = row["chain"] / max(row["total"], 1)
+    for group in ("by_class", "by_depth"):
+        for row in merged[group].values():
+            row["chain_ratio"] = row["chain"] / max(row["total"], 1)
+    for row in merged["uncertainty"].values():
+        count = max(row["count"], 1)
+        mean = row["sum"] / count
+        row["mean"] = mean
+        row["std"] = math.sqrt(max(row["sum_sq"] / count - mean * mean, 0.0))
+        row["bin_edges"] = np.linspace(-5.0, 5.0, 51).tolist()
+    return merged
+
+
+@torch.no_grad()
+def evaluate(model, loader, config, device, logger=None):
+    logger = _evaluation_logger(logger)
+    model.eval(); raw_model = model.module if hasattr(model, "module") else model
+    processor = FCOS3DPostProcessor(raw_model, config)
+    evaluation = config["evaluation"]
+    metric = _build_metric(config)
+    head_level_stats = bool(evaluation.get("head_level_stats", False))
+    cop_stats_enabled = bool(evaluation.get("cop_stats", False))
+    cop_ablation = bool(evaluation.get("cop_ablation", False))
+    adaptive = getattr(raw_model.head, "attribute_prediction_mode", "parallel") == "adaptive"
+    level_metrics = (
+        [_build_metric(config) for _ in config["model"]["strides"]]
+        if head_level_stats else []
+    )
+    branch_metrics = (
+        {name: _build_metric(config) for name in ("parallel", "chain")}
+        if adaptive and cop_ablation else {}
+    )
+    local_cop_state = _cop_state(config) if adaptive and cop_stats_enabled else None
     log_every = config["runtime"].get("val_log_every", 10)
     batch_finished = time.perf_counter()
     for step, (images, targets) in enumerate(loader):
@@ -376,6 +512,19 @@ def evaluate(model, loader, config, device, logger=None):
             postprocess_started = time.perf_counter()
             results = processor(outputs, targets)
             postprocess_seconds = time.perf_counter() - postprocess_started
+        diagnostics_started = time.perf_counter()
+        if level_metrics:
+            for level_index, level_metric in enumerate(level_metrics):
+                level_metric.update(
+                    _predictions_from_level(results, level_index), targets
+                )
+        if local_cop_state is not None:
+            _update_cop_state(local_cop_state, results, config)
+        if branch_metrics:
+            for branch_name, branch_metric in branch_metrics.items():
+                branch_outputs = [level[branch_name] for level in outputs]
+                branch_metric.update(processor(branch_outputs, targets), targets)
+        diagnostics_seconds = time.perf_counter() - diagnostics_started
         metric_started = time.perf_counter()
         metric.update(results, targets)
         metric_seconds = time.perf_counter() - metric_started
@@ -420,7 +569,8 @@ def evaluate(model, loader, config, device, logger=None):
             logger.info(
                 "Validation progress | batch=%d/%d samples=%s | "
                 "seconds[data=%.3f transfer=%.3f forward=%.3f "
-                "postprocess=%.3f nms=%.3f metric=%.3f total=%.3f] | "
+                "postprocess=%.3f nms=%.3f diagnostics=%.3f "
+                "metric=%.3f total=%.3f] | "
                 "candidates=%d invalid=%d nms_input=%d nms_truncated=%d "
                 "nms_output=%d rss=%.2fGB%s",
                 step + 1,
@@ -431,6 +581,7 @@ def evaluate(model, loader, config, device, logger=None):
                 forward_seconds,
                 postprocess_seconds,
                 stats["nms_seconds"],
+                diagnostics_seconds,
                 metric_seconds,
                 time.perf_counter() - batch_started,
                 stats["candidates_thresholded"],
@@ -443,10 +594,66 @@ def evaluate(model, loader, config, device, logger=None):
             )
         batch_finished = time.perf_counter()
     states = distributed_utils.gather_object_to_main(metric.state_dict())
+    gathered_levels = distributed_utils.gather_object_to_main(
+        [item.state_dict() for item in level_metrics]
+    ) if level_metrics else None
+    gathered_branches = distributed_utils.gather_object_to_main(
+        {name: item.state_dict() for name, item in branch_metrics.items()}
+    ) if branch_metrics else None
+    gathered_cop = distributed_utils.gather_object_to_main(
+        local_cop_state
+    ) if local_cop_state is not None else None
     if not distributed_utils.is_main_process():
         return None
     metric.load_state_dict([item for state in states for item in state])
-    return _json_value(metric.compute())
+    metrics = metric.compute()
+    if level_metrics:
+        level_payload = {}
+        for level_index, level_metric in enumerate(level_metrics):
+            level_metric.load_state_dict([
+                sample
+                for rank_states in gathered_levels
+                for sample in rank_states[level_index]
+            ])
+            level_payload["P%d_stride%d" % (
+                level_index + 3, config["model"]["strides"][level_index]
+            )] = level_metric.compute()
+        metrics["head_level_metrics"] = level_payload
+    if adaptive and (cop_stats_enabled or cop_ablation):
+        cop_payload = {
+            "enabled": True,
+            "attribute_prediction_mode": "adaptive",
+            "chain_reliability_threshold": float(
+                raw_model.head.chain_reliability_threshold
+            ),
+        }
+        if gathered_cop is not None:
+            cop_payload["selection"] = _merge_cop_states(gathered_cop)
+        if branch_metrics:
+            branch_payload = {
+                "adaptive": {
+                    key: value for key, value in metrics.items()
+                    if key != "head_level_metrics"
+                }
+            }
+            for branch_name, branch_metric in branch_metrics.items():
+                branch_metric.load_state_dict([
+                    sample
+                    for rank_states in gathered_branches
+                    for sample in rank_states[branch_name]
+                ])
+                branch_payload[branch_name] = branch_metric.compute()
+            cop_payload["branch_metrics"] = branch_payload
+        metrics["cop_diagnostics"] = cop_payload
+    elif cop_stats_enabled or cop_ablation:
+        metrics["cop_diagnostics"] = {
+            "enabled": False,
+            "attribute_prediction_mode": getattr(
+                raw_model.head, "attribute_prediction_mode", "parallel"
+            ),
+            "reason": "CoP diagnostics require adaptive mode",
+        }
+    return _json_value(metrics)
 
 
 def _capture_random_state(device=None):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import re
 from pathlib import Path
 
@@ -368,6 +369,241 @@ def _write_confidence_distribution(metrics, plot_dir):
     return generated
 
 
+_COMPARISON_METRICS = ("NDS", "mAP", "mRecall", "mPrecision", "F1")
+
+
+def _summary_row(name, metrics):
+    row = {"name": name}
+    for key in _COMPARISON_METRICS + (
+        "mATE", "mASE", "mAOE", "mADE", "num_gt",
+        "num_predictions", "num_tp",
+    ):
+        row[key] = metrics.get(key)
+    return row
+
+
+def _write_csv(path, rows):
+    rows = list(rows)
+    if not rows:
+        return
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _grouped_metric_plot(named_metrics, title, output_path):
+    names = list(named_metrics)
+    positions = np.arange(len(names), dtype=np.float64)
+    width = 0.14
+    figure, axis = plt.subplots(figsize=(max(10, len(names) * 1.8), 6.2))
+    colors = (BLUE, ORANGE, GREEN, RED, PURPLE)
+    for index, key in enumerate(_COMPARISON_METRICS):
+        values = [float(named_metrics[name].get(key, 0.0)) for name in names]
+        offset = (index - 2) * width
+        axis.bar(positions + offset, values, width=width * 0.92,
+                 label=key, color=colors[index])
+    axis.set_xticks(positions, names, rotation=20, ha="right")
+    axis.set_ylim(0.0, 1.0)
+    axis.set_ylabel("Score")
+    axis.set_title(title, loc="left", pad=14)
+    axis.legend(ncol=5, loc="upper right")
+    _decorate_axis(axis, "y")
+    _finish_figure(figure, output_path)
+
+
+def _write_head_level_diagnostics(metrics, plot_dir):
+    levels = metrics.get("head_level_metrics")
+    if not levels:
+        return None
+    output_dir = Path(plot_dir) / "head_levels"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = [_summary_row(name, payload) for name, payload in levels.items()]
+    _write_json(output_dir / "summary.json", rows)
+    _write_csv(output_dir / "summary.csv", rows)
+    _grouped_metric_plot(
+        levels, "Pyramid-level contribution metrics",
+        output_dir / "level_comparison.png",
+    )
+    prediction_counts = {
+        name: payload.get("num_predictions", 0) for name, payload in levels.items()
+    }
+    _horizontal_bars(
+        prediction_counts, "Final predictions attributed to each pyramid level",
+        output_dir / "prediction_distribution.png",
+    )
+    generated = [
+        str(output_dir / "summary.json"), str(output_dir / "summary.csv"),
+        str(output_dir / "level_comparison.png"),
+        str(output_dir / "prediction_distribution.png"),
+    ]
+    for name, payload in levels.items():
+        level_dir = output_dir / name
+        level_dir.mkdir(exist_ok=True)
+        _write_json(level_dir / "metrics.json", payload)
+        confusion = payload.get("confusion_matrix", {})
+        _write_json(level_dir / "confusion_matrix.json", confusion)
+        _confusion_matrix_plot(confusion, level_dir / "confusion_matrix.png")
+        _write_json(level_dir / "per_class_metrics.json",
+                    payload.get("per_class_detection", {}))
+        _class_diagnostics(payload, level_dir / "per_class_metrics.png")
+        _write_confidence_distribution(payload, level_dir)
+        generated.extend([
+            str(level_dir / "metrics.json"),
+            str(level_dir / "confusion_matrix.json"),
+            str(level_dir / "confusion_matrix.png"),
+            str(level_dir / "per_class_metrics.json"),
+            str(level_dir / "per_class_metrics.png"),
+        ])
+    return generated
+
+
+def _selection_ratio_plot(selection, output_path):
+    stages = selection.get("stages", {})
+    labels = ["P%d" % (index + 3) for index in range(5)]
+    positions = np.arange(len(labels), dtype=np.float64)
+    width = 0.24
+    figure, axis = plt.subplots(figsize=(10.5, 5.8))
+    colors = (BLUE, ORANGE, GREEN)
+    for index, stage in enumerate(("thresholded", "valid", "final")):
+        rows = stages.get(stage, [])
+        values = [row.get("chain_ratio", 0.0) for row in rows]
+        values += [0.0] * (len(labels) - len(values))
+        axis.bar(positions + (index - 1) * width, values[:len(labels)],
+                 width=width * 0.9, color=colors[index], label=stage)
+    axis.set_xticks(positions, labels)
+    axis.set_ylim(0.0, 1.0)
+    axis.set_ylabel("Chain selection ratio")
+    axis.set_title("CoP chain selection across processing stages", loc="left")
+    axis.legend()
+    _decorate_axis(axis, "y")
+    _finish_figure(figure, output_path)
+
+
+def _ratio_bars(rows, title, output_path):
+    values = {name: row.get("chain_ratio", 0.0) for name, row in rows.items()}
+    _horizontal_bars(values, title, output_path)
+
+
+def _delta_bars(values, title, output_path):
+    labels = list(values)
+    numeric = np.asarray([float(values[label]) for label in labels])
+    positions = np.arange(len(labels))
+    colors = [GREEN if value >= 0 else RED for value in numeric]
+    figure, axis = plt.subplots(figsize=(11, max(4.5, 0.48 * len(labels) + 1.7)))
+    axis.barh(positions, numeric, color=colors, height=0.65)
+    axis.set_yticks(positions, labels)
+    axis.invert_yaxis()
+    limit = max(float(np.abs(numeric).max()) if numeric.size else 0.0, 0.01)
+    axis.set_xlim(-limit * 1.15, limit * 1.15)
+    axis.axvline(0.0, color=TEXT, linewidth=1.0)
+    axis.set_xlabel("AP delta")
+    axis.set_title(title, loc="left")
+    _decorate_axis(axis, "x")
+    _finish_figure(figure, output_path)
+
+
+def _uncertainty_plot(uncertainty, output_path):
+    figure, axis = plt.subplots(figsize=(11, 5.8))
+    for branch, color in (("parallel", BLUE), ("chain", ORANGE)):
+        row = uncertainty.get(branch, {})
+        edges = np.asarray(row.get("bin_edges", np.linspace(-5, 5, 51)))
+        counts = np.asarray(row.get("hist", [0] * 50))
+        centers = (edges[:-1] + edges[1:]) / 2.0
+        axis.plot(centers, counts, color=color, linewidth=2,
+                  label="%s · mean %.3f" % (branch, row.get("mean", 0.0)))
+    axis.set_xlabel("Depth log scale")
+    axis.set_ylabel("Final detection count")
+    axis.set_title("CoP branch uncertainty distribution", loc="left")
+    axis.legend()
+    _decorate_axis(axis, "both")
+    _finish_figure(figure, output_path)
+
+
+def _write_cop_diagnostics(metrics, plot_dir):
+    cop = metrics.get("cop_diagnostics")
+    if not cop:
+        return None
+    output_dir = Path(plot_dir) / "cop_diagnostics"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(output_dir / "diagnostics.json", cop)
+    generated = [str(output_dir / "diagnostics.json")]
+    if not cop.get("enabled"):
+        return generated
+    selection = cop.get("selection")
+    if selection:
+        _write_json(output_dir / "selection_summary.json", selection)
+        _selection_ratio_plot(selection, output_dir / "selection_by_level.png")
+        _ratio_bars(selection.get("by_class", {}),
+                    "CoP chain selection by class",
+                    output_dir / "selection_by_class.png")
+        _ratio_bars(selection.get("by_depth", {}),
+                    "CoP chain selection by depth",
+                    output_dir / "selection_by_depth.png")
+        _uncertainty_plot(selection.get("uncertainty", {}),
+                          output_dir / "uncertainty_distribution.png")
+        selection_rows = []
+        for stage, rows in selection.get("stages", {}).items():
+            for row in rows:
+                selection_rows.append({
+                    "group": "stage_%s" % stage,
+                    "name": row.get("name", "P%d" % (row.get("level", 0) + 3)),
+                    "total": row.get("total", 0),
+                    "chain": row.get("chain", 0),
+                    "chain_ratio": row.get("chain_ratio", 0.0),
+                })
+        for group in ("by_class", "by_depth"):
+            for name, row in selection.get(group, {}).items():
+                selection_rows.append({"group": group, "name": name, **row})
+        _write_csv(output_dir / "selection_summary.csv", selection_rows)
+        generated.extend(str(output_dir / name) for name in (
+            "selection_summary.json", "selection_summary.csv",
+            "selection_by_level.png", "selection_by_class.png",
+            "selection_by_depth.png", "uncertainty_distribution.png",
+        ))
+    branches = cop.get("branch_metrics")
+    if branches:
+        rows = [_summary_row(name, payload) for name, payload in branches.items()]
+        _write_json(output_dir / "branch_comparison.json", rows)
+        _write_csv(output_dir / "branch_comparison.csv", rows)
+        _grouped_metric_plot(
+            branches, "CoP adaptive vs fixed-branch ablation",
+            output_dir / "branch_metrics.png",
+        )
+        adaptive_ap = branches["adaptive"].get("per_class_AP", {})
+        parallel_ap = branches["parallel"].get("per_class_AP", {})
+        deltas = {
+            name: (
+                0.0 if adaptive_ap.get(name) is None or parallel_ap.get(name) is None
+                else adaptive_ap[name] - parallel_ap[name]
+            )
+            for name in adaptive_ap
+        }
+        _write_json(output_dir / "per_class_ap_delta.json", deltas)
+        _delta_bars(
+            deltas, "Adaptive AP delta relative to parallel",
+            output_dir / "per_class_ap_delta.png",
+        )
+        generated.extend(str(output_dir / name) for name in (
+            "branch_comparison.json", "branch_comparison.csv",
+            "branch_metrics.png", "per_class_ap_delta.json",
+            "per_class_ap_delta.png",
+        ))
+        for branch, payload in branches.items():
+            branch_dir = output_dir / branch
+            branch_dir.mkdir(exist_ok=True)
+            confusion = payload.get("confusion_matrix", {})
+            _write_json(branch_dir / "confusion_matrix.json", confusion)
+            _confusion_matrix_plot(confusion, branch_dir / "confusion_matrix.png")
+            generated.extend([
+                str(branch_dir / "confusion_matrix.json"),
+                str(branch_dir / "confusion_matrix.png"),
+            ])
+    return generated
+
+
 def write_test_report(metrics, metric_path, plot_dir, metadata):
     metric_path, plot_dir = Path(metric_path), Path(plot_dir)
     split = metadata.get("split", "test")
@@ -431,6 +667,12 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
     confidence_files = _write_confidence_distribution(metrics, plot_dir)
     if confidence_files is not None:
         files["confidence_distribution"] = confidence_files
+    head_level_files = _write_head_level_diagnostics(metrics, plot_dir)
+    if head_level_files is not None:
+        files["head_levels"] = head_level_files
+    cop_files = _write_cop_diagnostics(metrics, plot_dir)
+    if cop_files is not None:
+        files["cop_diagnostics"] = cop_files
     plot_index = {"backend": "matplotlib", "plot_dir": str(plot_dir), "files": files}
     _write_json(plot_dir / "plots_index.json", plot_index)
     report_metadata = dict(metadata)
