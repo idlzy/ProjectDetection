@@ -27,6 +27,14 @@ from .logging_utils import configure_training_logging, log_runtime_environment
 from .metrics import Mw3dMetric
 from .models import build_model
 from .task import FCOS3DLoss, FCOS3DPostProcessor
+from .training import (
+    apply_freeze_schedule,
+    backbone_pretrain_coverage,
+    build_optimizer_parameters,
+    freeze_policy,
+    freeze_state_for_checkpoint,
+    validate_resume_freeze_policy,
+)
 
 
 class NonFiniteTrainingError(RuntimeError):
@@ -329,17 +337,29 @@ def save_checkpoint(
     raw_model = model.module if hasattr(model, "module") else model
     temporary = path.with_suffix(path.suffix + ".tmp")
     local_random_state = _capture_random_state()
-    torch.save({"model": raw_model.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(), "scaler": scaler.state_dict(),
-                "epoch": epoch, "step_in_epoch": step_in_epoch,
-                "best_metric": best_metric, "config": config,
-                "random_state": local_random_state,
-                "random_states": random_states,
-                "distributed_state": distributed_state}, temporary)
+    torch.save(
+        {
+            "model": raw_model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "scaler": scaler.state_dict(),
+            "epoch": epoch,
+            "step_in_epoch": step_in_epoch,
+            "best_metric": best_metric,
+            "config": config,
+            "freeze_state": freeze_state_for_checkpoint(config, epoch),
+            "random_state": local_random_state,
+            "random_states": random_states,
+            "distributed_state": distributed_state,
+        },
+        temporary,
+    )
     os.replace(str(temporary), str(path))
 
 
 def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None, strict=True,
-                    restore_random_state=False, rank=0, device=None):
+                    restore_random_state=False, rank=0, device=None,
+                    checkpoint_validator=None):
     try:
         # Project checkpoints contain optimizer/config/RNG metadata and are
         # trusted local artifacts, not tensor-only interchange files.
@@ -351,6 +371,8 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None, st
     state = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
     state = {(key[7:] if key.startswith("module.") else key): value for key, value in state.items()}
     result = model.load_state_dict(state, strict=strict)
+    if checkpoint_validator is not None:
+        checkpoint_validator(checkpoint)
     if optimizer is not None and "optimizer" in checkpoint: optimizer.load_state_dict(checkpoint["optimizer"])
     if scheduler is not None and "scheduler" in checkpoint: scheduler.load_state_dict(checkpoint["scheduler"])
     if scaler is not None and "scaler" in checkpoint: scaler.load_state_dict(checkpoint["scaler"])
@@ -493,7 +515,11 @@ def train(config):
         logger.info("Model parameters | total=%d | trainable=%d", total_parameters, trainable_parameters)
         logger.info("Model architecture:\n%s", model)
     if world_size > 1 and config["train"]["sync_batch_norm"]: model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["train"]["learning_rate"], weight_decay=config["train"]["weight_decay"])
+    optimizer = torch.optim.AdamW(
+        build_optimizer_parameters(model, config),
+        lr=config["train"]["learning_rate"],
+        weight_decay=config["train"]["weight_decay"],
+    )
     scaler = torch.cuda.amp.GradScaler(
         enabled=config["train"]["amp"] and device.type == "cuda",
         init_scale=float(config["train"].get("amp_initial_scale", 2048.0)),
@@ -550,6 +576,9 @@ def train(config):
         checkpoint, _ = load_checkpoint(
             resume, model, optimizer, scheduler, scaler, strict=True,
             restore_random_state=False,
+            checkpoint_validator=lambda saved: validate_resume_freeze_policy(
+                saved, config
+            ),
         )
         _validate_resume_topology(checkpoint, config, world_size, len(train_loader))
         random_states = checkpoint.get("random_states")
@@ -577,17 +606,24 @@ def train(config):
         checkpoint, load_result = load_checkpoint(
             config["train"]["pretrain"], model, strict=False
         )
+        coverage = backbone_pretrain_coverage(model, checkpoint)
+        if freeze_policy(config)["enabled"] and coverage["element_ratio"] < 1.0:
+            raise RuntimeError(
+                "cannot freeze an incompletely loaded backbone: "
+                "element_ratio=%.6f missing=%s mismatched=%s"
+                % (
+                    coverage["element_ratio"],
+                    coverage["missing"][:20],
+                    coverage["mismatched"][:20],
+                )
+            )
         conversion = checkpoint.get("conversion_report", {})
         logger.info(
             "Loaded pretrained weights | path=%s | loaded_tensors=%s | "
-            "backbone_element_ratio=%s | missing=%d | unexpected=%d",
+            "backbone_element_ratio=%.6f | missing=%d | unexpected=%d",
             config["train"]["pretrain"],
             conversion.get("loaded_tensors", "unknown"),
-            (
-                "%.4f" % conversion["loaded_backbone_element_ratio"]
-                if "loaded_backbone_element_ratio" in conversion
-                else "unknown"
-            ),
+            coverage["element_ratio"],
             len(load_result.missing_keys),
             len(load_result.unexpected_keys),
         )
@@ -630,11 +666,33 @@ def train(config):
     consecutive_amp_overflows = 0
     recovery_every = int(config["train"].get("recovery_checkpoint_every_steps", 100))
     last_recovery_global_step = start_epoch * len(train_loader) + resume_step
+    last_backbone_frozen = None
+    policy = freeze_policy(config)
+    if rank == 0:
+        logger.info(
+            "Freeze policy | enabled=%s | modules=%s | epochs=%d | "
+            "backbone_lr_multiplier=%.6g",
+            policy["enabled"],
+            ",".join(policy["modules"]),
+            policy["epochs"],
+            policy["backbone_lr_multiplier"],
+        )
     training_started = time.time()
     try:
         for epoch in range(start_epoch, config["train"]["epochs"]):
             epoch_started = time.time()
             training_step.train()
+            freeze_state = apply_freeze_schedule(model, config, epoch)
+            if freeze_state["frozen"] != last_backbone_frozen:
+                if rank == 0:
+                    logger.info(
+                        "Backbone state changed | epoch=%d | state=%s | "
+                        "trainable_parameters=%d",
+                        epoch + 1,
+                        "frozen" if freeze_state["frozen"] else "trainable",
+                        freeze_state["trainable_parameters"],
+                    )
+                last_backbone_frozen = freeze_state["frozen"]
             if hasattr(train_loader.sampler, "set_epoch"):
                 train_loader.sampler.set_epoch(epoch)
             if rank == 0:
@@ -757,14 +815,29 @@ def train(config):
                     gpu_memory = ""
                     if device.type == "cuda":
                         gpu_memory = " gpu_mem=%.2fGB" % (torch.cuda.max_memory_allocated(device) / (1024 ** 3))
+                    backbone_lr = next(
+                        (
+                            group["lr"]
+                            for group in optimizer.param_groups
+                            if group.get("name") == "backbone"
+                        ),
+                        None,
+                    )
+                    backbone_lr_text = (
+                        " backbone_lr=%.8g" % backbone_lr
+                        if backbone_lr is not None
+                        else ""
+                    )
                     logger.info(
-                        "epoch=%d/%d step=%d/%d global_step=%d lr=%.8g grad_norm=%.5f step_time=%.3fs%s %s",
+                        "epoch=%d/%d step=%d/%d global_step=%d lr=%.8g%s "
+                        "grad_norm=%.5f step_time=%.3fs%s %s",
                         epoch + 1,
                         config["train"]["epochs"],
                         step + 1,
                         len(train_loader),
                         current_global_step,
                         optimizer.param_groups[0]["lr"],
+                        backbone_lr_text,
                         float(gradient_norm),
                         time.time() - step_started,
                         gpu_memory,

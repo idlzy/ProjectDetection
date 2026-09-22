@@ -258,6 +258,27 @@ CUDA_VISIBLE_DEVICES=0 scripts/start_train.sh \
 用已有 PGDA 权重初始化，应先通过 checkpoint 转换工具忽略新增分支，并从新的
 optimizer 状态开始训练，不能把它作为 `train.resume` 使用。
 
+PGDA 及其 CoP、Chain 等派生配置支持先冻结完整 backbone、再按 epoch 自动解冻。
+当前只允许冻结 `backbone`；配置 `neck` 或 `head` 会在启动时直接报错。冻结期间
+backbone 参数和 BN 统计均不更新，解冻后使用单独的学习率倍率：
+
+```yaml
+train:
+  pretrain: checkpoints/trained/0919/best.pth
+  resume: null
+  freeze:
+    enabled: true
+    modules: [backbone]
+    epochs: 5
+    backbone_lr_multiplier: 0.1
+```
+
+上述配置冻结第 1--5 个 epoch，从第 6 个 epoch 开始训练 backbone。启用冻结的新
+实验必须提供能够完整加载 backbone 的 `train.pretrain`；从本实验 checkpoint 恢复
+时使用 `train.resume`，冻结状态由 checkpoint epoch 自动恢复。新策略不能与 R101
+的 `model.backbone_frozen_stages` 同时启用；若希望 R101 使用完整 backbone 的阶段
+冻结，应先设置 `backbone_frozen_stages: -1`。
+
 使用公开 FCOS3D 风格的 ResNet-101 + FPN，并在骨干 C4/C5 和检测 Head 最后一层
 启用 modulated DCNv2：
 

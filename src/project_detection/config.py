@@ -153,6 +153,56 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("evaluation.depth_bins must contain increasing [min, max] pairs")
     if config["train"].get("validate_every", 1) < 1:
         raise ValueError("train.validate_every must be at least 1")
+    pretrain = config["train"].get("pretrain")
+    resume = config["train"].get("resume")
+    if pretrain and resume:
+        raise ValueError("train.pretrain and train.resume are mutually exclusive")
+    freeze = config["train"].get("freeze", {})
+    if not isinstance(freeze, dict):
+        raise ValueError("train.freeze must be a mapping")
+    freeze_enabled = freeze.get("enabled", False)
+    if not isinstance(freeze_enabled, bool):
+        raise ValueError("train.freeze.enabled must be true or false")
+    freeze_modules = freeze.get("modules", ["backbone"])
+    if not isinstance(freeze_modules, list) or freeze_modules != ["backbone"]:
+        raise ValueError(
+            "train.freeze.modules currently supports only [backbone]; "
+            "neck and head freezing are not allowed"
+        )
+    freeze_epochs = freeze.get("epochs", 0)
+    if (
+        not isinstance(freeze_epochs, int)
+        or isinstance(freeze_epochs, bool)
+        or freeze_epochs < 0
+    ):
+        raise ValueError("train.freeze.epochs must be a non-negative integer")
+    backbone_lr_multiplier = freeze.get("backbone_lr_multiplier", 0.1)
+    if (
+        not isinstance(backbone_lr_multiplier, (int, float))
+        or isinstance(backbone_lr_multiplier, bool)
+        or not 0 < backbone_lr_multiplier <= 1
+    ):
+        raise ValueError(
+            "train.freeze.backbone_lr_multiplier must be in (0, 1]"
+        )
+    if freeze_enabled:
+        if freeze_epochs < 1 or freeze_epochs >= config["train"]["epochs"]:
+            raise ValueError(
+                "enabled train.freeze.epochs must be at least 1 and less than train.epochs"
+            )
+        if not (pretrain or resume):
+            raise ValueError(
+                "enabled train.freeze requires train.pretrain or train.resume"
+            )
+        if config["model"].get("backbone_frozen_stages", -1) >= 0:
+            raise ValueError(
+                "train.freeze cannot be combined with model.backbone_frozen_stages; "
+                "set backbone_frozen_stages=-1"
+            )
+    elif freeze_epochs != 0:
+        raise ValueError(
+            "train.freeze.epochs must be 0 when train.freeze.enabled is false"
+        )
     if not isinstance(config["train"].get("nonfinite_guard", True), bool):
         raise ValueError("train.nonfinite_guard must be true or false")
     if config["train"].get("nonfinite_parameter_check_every", 100) < 1:
