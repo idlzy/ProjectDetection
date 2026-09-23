@@ -14,36 +14,90 @@ def feature_points(height, width, stride, device):
     return torch.stack([(x.reshape(-1) + 0.5) * stride, (y.reshape(-1) + 0.5) * stride], dim=1)
 
 
+def _target_assignment_geometry(points, targets, regress_range, stride, center_radius):
+    """Build the point-to-GT validity matrix shared by training and diagnostics."""
+    device = points.device
+    boxes = targets["boxes2d"].to(device)
+    centers = targets["centers2d"].to(device)
+    if boxes.numel() == 0:
+        distances = points.new_zeros((points.shape[0], 0, 4))
+        valid = torch.zeros(
+            (points.shape[0], 0), dtype=torch.bool, device=device
+        )
+        return boxes, centers, distances, valid
+
+    px, py = points[:, 0:1], points[:, 1:2]
+    left = px - boxes[:, 0]
+    top = py - boxes[:, 1]
+    right = boxes[:, 2] - px
+    bottom = boxes[:, 3] - py
+    distances = torch.stack([left, top, right, bottom], dim=2)
+    inside_box = distances.min(dim=2).values > 0
+    max_distance = distances.max(dim=2).values
+    in_range = (max_distance >= regress_range[0]) & (
+        max_distance <= regress_range[1]
+    )
+    radius = stride * center_radius
+    center_ok = (px - centers[:, 0]).abs() <= radius
+    center_ok &= (py - centers[:, 1]).abs() <= radius
+    valid = inside_box & in_range & center_ok
+    return boxes, centers, distances, valid
+
+
+def _match_target_candidates(boxes, valid):
+    """Resolve point-to-GT candidates with the same smallest-area rule as FCOS."""
+    count = valid.shape[0]
+    matched_indices = torch.full(
+        (count,), -1, dtype=torch.long, device=valid.device
+    )
+    if boxes.numel() == 0:
+        return matched_indices
+
+    areas = (
+        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    ).unsqueeze(0).expand(count, -1)
+    candidate_areas = areas.masked_fill(~valid, float("inf"))
+    min_area, matched = candidate_areas.min(dim=1)
+    positive = torch.isfinite(min_area)
+    matched_indices[positive] = matched[positive]
+    return matched_indices
+
+
+def target_assignment_diagnostics(
+    points, targets, regress_range, stride, center_radius=1.5
+):
+    """Return candidates before conflict resolution and final GT matches.
+
+    The candidate matrix has shape ``[num_points, num_gt]``. A true entry
+    means that the point satisfies the box, regression-range and center
+    sampling constraints for that GT. ``matched_indices`` applies the same
+    smallest-area conflict resolution used by :func:`assign_targets`.
+    """
+    boxes, _, _, valid = _target_assignment_geometry(
+        points, targets, regress_range, stride, center_radius
+    )
+    matched_indices = _match_target_candidates(boxes, valid)
+    return valid, matched_indices
+
+
 def assign_targets(points, targets, regress_range, stride, center_radius=1.5):
     count = points.shape[0]; device = points.device
     labels = torch.full((count,), -1, dtype=torch.long, device=device)
     regression = torch.zeros((count, 9), device=device)
     centerness = torch.zeros((count,), device=device)
     direction = torch.zeros((count,), dtype=torch.long, device=device)
-    matched_indices = torch.full((count,), -1, dtype=torch.long, device=device)
-    boxes = targets["boxes2d"].to(device)
+    boxes, centers, distances, valid = _target_assignment_geometry(
+        points, targets, regress_range, stride, center_radius
+    )
+    matched_indices = _match_target_candidates(boxes, valid)
     if boxes.numel() == 0:
         return labels, regression, centerness, direction, matched_indices
-    centers = targets["centers2d"].to(device); boxes3d = targets["boxes3d"].to(device)
+    boxes3d = targets["boxes3d"].to(device)
     gt_labels = targets["labels"].to(device)
-    px, py = points[:, 0:1], points[:, 1:2]
-    left = px - boxes[:, 0]; top = py - boxes[:, 1]
-    right = boxes[:, 2] - px; bottom = boxes[:, 3] - py
-    distances = torch.stack([left, top, right, bottom], dim=2)
-    inside_box = distances.min(dim=2).values > 0
-    max_distance = distances.max(dim=2).values
-    in_range = (max_distance >= regress_range[0]) & (max_distance <= regress_range[1])
-    radius = stride * center_radius
-    center_ok = (px - centers[:, 0]).abs() <= radius
-    center_ok &= (py - centers[:, 1]).abs() <= radius
-    valid = inside_box & in_range & center_ok
-    areas = ((boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])).unsqueeze(0).repeat(count, 1)
-    areas[~valid] = float("inf")
-    min_area, matched = areas.min(dim=1)
-    positive = torch.isfinite(min_area)
+    positive = matched_indices >= 0
     if not positive.any():
         return labels, regression, centerness, direction, matched_indices
-    match = matched[positive]
+    match = matched_indices[positive]
     labels[positive] = gt_labels[match]
     matched_indices[positive] = match
     regression[positive, :2] = (centers[match] - points[positive]) / float(stride)
