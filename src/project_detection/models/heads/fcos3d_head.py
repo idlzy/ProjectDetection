@@ -127,6 +127,7 @@ class FCOS3DHead(nn.Module):
         deform_groups=1,
         attribute_prediction_mode="parallel",
         chain_reliability_threshold=0.2,
+        camera_conditioning=False,
     ):
         super().__init__()
         if attribute_prediction_mode not in ("parallel", "chain", "adaptive"):
@@ -136,6 +137,7 @@ class FCOS3DHead(nn.Module):
         self.geometric_depth = geometric_depth
         self.attribute_prediction_mode = attribute_prediction_mode
         self.chain_reliability_threshold = chain_reliability_threshold
+        self.camera_conditioning = camera_conditioning
         self.num_levels = 5
         self.group_reg_dims = (2, 1, 3, 1)
         self.register_buffer(
@@ -180,6 +182,14 @@ class FCOS3DHead(nn.Module):
                 )
                 for index in range(len(self.group_reg_dims))
             ]
+        )
+        self.camera_film = (
+            nn.Sequential(
+                nn.Linear(4, 64),
+                nn.ReLU(),
+                nn.Linear(64, 6 * feat_channels),
+            )
+            if camera_conditioning else None
         )
         self.size_to_orientation = (
             nn.Conv2d(feat_channels, feat_channels, 1, bias=False)
@@ -229,6 +239,9 @@ class FCOS3DHead(nn.Module):
             [nn.Parameter(torch.ones(1)) for _ in range(self.num_levels)]
         )
         self._init_weights()
+        if self.camera_film is not None:
+            nn.init.zeros_(self.camera_film[-1].weight)
+            nn.init.zeros_(self.camera_film[-1].bias)
         if self.attribute_prediction_mode != "parallel":
             nn.init.zeros_(self.size_to_orientation.weight)
             nn.init.zeros_(self.orientation_to_depth.weight)
@@ -275,9 +288,14 @@ class FCOS3DHead(nn.Module):
                 nn.init.zeros_(module.conv_offset_mask.bias)
         nn.init.constant_(self.conv_cls.bias, -math.log((1 - 0.01) / 0.01))
 
-    def forward(self, features):
+    def forward(self, features, camera_features=None):
         if len(features) != self.num_levels:
             raise ValueError("FCOS3DHead expects five pyramid feature levels")
+        film = None
+        if self.camera_film is not None:
+            if camera_features is None or camera_features.shape != (features[0].shape[0], 4):
+                raise ValueError("camera_features must have shape [batch, 4]")
+            film = self.camera_film(camera_features).chunk(6, dim=1)
         outputs = []
         for level, feature in enumerate(features):
             cls_feature = self.cls_tower(feature, level)
@@ -287,6 +305,13 @@ class FCOS3DHead(nn.Module):
             regression_features = [
                 branch(reg_feature, level) for branch in self.reg_branches
             ]
+            if film is not None:
+                for branch_index in range(3):
+                    gamma = film[2 * branch_index][:, :, None, None]
+                    beta = film[2 * branch_index + 1][:, :, None, None]
+                    regression_features[branch_index] = (
+                        regression_features[branch_index] * (1 + gamma) + beta
+                    )
             parallel_features = list(regression_features)
             if self.attribute_prediction_mode != "parallel":
                 size_delta = self.size_to_orientation(regression_features[2])

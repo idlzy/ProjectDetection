@@ -23,7 +23,7 @@ from matplotlib.font_manager import FontProperties
 
 from project_detection.config import load_config
 from project_detection.engine import load_checkpoint
-from project_detection.models import build_model
+from project_detection.models import build_model, forward_with_targets
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import draw_camera_view
 if __package__:
@@ -398,7 +398,9 @@ def render_test_batches(args):
                         )
                     else:
                         model_input = torch.from_numpy(tensor).to(device)
-                        predictions = pytorch_model(model_input)
+                        predictions = forward_with_targets(
+                            pytorch_model, model_input, [target]
+                        )
                     result = processor(predictions, [target])[0]
                 _synchronize(device)
                 camera = draw_camera_view(

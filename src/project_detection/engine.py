@@ -30,7 +30,7 @@ from .logging_utils import (
     log_runtime_environment,
 )
 from .metrics import Mw3dMetric
-from .models import build_model
+from .models import build_model, forward_with_targets
 from .task import FCOS3DLoss, FCOS3DPostProcessor
 from .training import (
     apply_freeze_schedule,
@@ -62,7 +62,7 @@ class DetectionTrainingStep(torch.nn.Module):
         self.criterion = criterion
 
     def forward(self, images, targets):
-        outputs = self.detector(images)
+        outputs = forward_with_targets(self.detector, images, targets)
         return self.criterion(outputs, targets, self.detector.head)
 
 
@@ -494,7 +494,7 @@ def evaluate(model, loader, config, device, logger=None):
             timing_events[0].record()
             images = images.to(device, non_blocking=True)
             timing_events[1].record()
-            outputs = raw_model(images)
+            outputs = forward_with_targets(raw_model, images, targets)
             timing_events[2].record()
             results = processor(outputs, targets)
             timing_events[3].record()
@@ -507,7 +507,7 @@ def evaluate(model, loader, config, device, logger=None):
             images = images.to(device, non_blocking=True)
             transfer_seconds = time.perf_counter() - transfer_started
             forward_started = time.perf_counter()
-            outputs = raw_model(images)
+            outputs = forward_with_targets(raw_model, images, targets)
             forward_seconds = time.perf_counter() - forward_started
             postprocess_started = time.perf_counter()
             results = processor(outputs, targets)

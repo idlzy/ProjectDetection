@@ -27,4 +27,5 @@ def build_model(config):
         deform_groups=model.get("deform_groups", 1),
         attribute_prediction_mode=model.get("attribute_prediction_mode", "parallel"),
         chain_reliability_threshold=model.get("chain_reliability_threshold", 0.2),
+        camera_conditioning=model.get("camera_conditioning", False),
     )

@@ -13,7 +13,7 @@ from project_detection.config import load_config
 from project_detection.data.geometry import load_front_left_calibration
 from project_detection.data.preprocessing import normalize_image
 from project_detection.engine import load_checkpoint
-from project_detection.models import build_model
+from project_detection.models import build_model, forward_with_targets
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import draw_bev, draw_camera_view
 
@@ -255,7 +255,9 @@ def main():
             image_path, calibration_path, config, extrinsic_path
         )
         with torch.no_grad():
-            outputs = model(tensor.unsqueeze(0).to(device))
+            outputs = forward_with_targets(
+                model, tensor.unsqueeze(0).to(device), [target]
+            )
             result = processor(outputs, [target])[0]
 
         camera_path, bev_path = output_paths(

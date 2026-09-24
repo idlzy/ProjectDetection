@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 from torch import nn
 
 from ..backbones import (
@@ -34,8 +35,12 @@ class FCOS3D(nn.Module):
         deform_groups=1,
         attribute_prediction_mode="parallel",
         chain_reliability_threshold=0.2,
+        camera_conditioning=False,
     ):
         super().__init__()
+        if camera_conditioning and backbone == "legacy_hat_efficientnet_b0":
+            raise ValueError("Camera conditioning is not supported by the legacy HAT head")
+        self.camera_conditioning = camera_conditioning
         if attribute_prediction_mode != "parallel" and backbone == "legacy_hat_efficientnet_b0":
             raise ValueError("Legacy HAT supports only parallel attribute prediction")
         if backbone == "efficientnet_b0":
@@ -91,9 +96,30 @@ class FCOS3D(nn.Module):
                 deform_groups=deform_groups,
                 attribute_prediction_mode=attribute_prediction_mode,
                 chain_reliability_threshold=chain_reliability_threshold,
+                camera_conditioning=camera_conditioning,
             )
 
-    def forward(self, images):
+    def forward(self, images, camera_matrices=None):
         features = self.backbone(images)
         pyramid = self.neck(features)
-        return self.head(pyramid)
+        if not self.camera_conditioning:
+            return self.head(pyramid)
+        if camera_matrices is None:
+            raise ValueError("camera_matrices are required when camera conditioning is enabled")
+        if camera_matrices.shape != (images.shape[0], 3, 3):
+            raise ValueError("camera_matrices must have shape [batch, 3, 3]")
+        camera_matrices = camera_matrices.to(device=images.device, dtype=images.dtype)
+        focal_x = camera_matrices[:, 0, 0] / images.shape[-1]
+        focal_y = camera_matrices[:, 1, 1] / images.shape[-2]
+        if not bool(torch.isfinite(camera_matrices).all()) or bool((focal_x <= 0).any()) or bool((focal_y <= 0).any()):
+            raise ValueError("camera_matrices must be finite with positive focal lengths")
+        camera_features = torch.stack(
+            (
+                focal_x.log(),
+                focal_y.log(),
+                camera_matrices[:, 0, 2] / images.shape[-1],
+                camera_matrices[:, 1, 2] / images.shape[-2],
+            ),
+            dim=1,
+        )
+        return self.head(pyramid, camera_features)

@@ -14,7 +14,7 @@ import torch
 from project_detection.config import load_config
 from project_detection.data.geometry import project_distorted, vehicle_box_corners
 from project_detection.engine import build_loader, load_checkpoint
-from project_detection.models import build_model
+from project_detection.models import build_model, forward_with_targets
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import (
     draw_bev as draw_shared_bev,
@@ -355,7 +355,10 @@ def main():
                 print("[%d/%d] skip existing: %s" % (sequence + 1, len(indices), camera_path))
                 continue
             with torch.no_grad():
-                result = processor(model(image_tensor.unsqueeze(0).to(device)), [target])[0]
+                outputs = forward_with_targets(
+                    model, image_tensor.unsqueeze(0).to(device), [target]
+                )
+                result = processor(outputs, [target])[0]
             original = cv2.imread(target["image_path"], cv2.IMREAD_COLOR)
             camera = draw_shared_camera_view(
                 original.copy(), target, result, config["data"]["classes"],

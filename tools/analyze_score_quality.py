@@ -16,7 +16,7 @@ import torch
 
 from project_detection.config import load_config
 from project_detection.engine import build_loader, load_checkpoint
-from project_detection.models import build_model
+from project_detection.models import build_model, forward_with_targets
 from project_detection.task import FCOS3DPostProcessor
 
 
@@ -232,7 +232,9 @@ def run_checkpoint(config, checkpoint, loader, device, output_dir, split, manife
     rows = []
     with torch.no_grad():
         for images, targets in loader:
-            predictions = processor(model(images.to(device)), targets)
+            predictions = processor(
+                forward_with_targets(model, images.to(device), targets), targets
+            )
             for prediction, target in zip(predictions, targets):
                 rows.extend(row for row in match_frame(
                     prediction, target, classes, threshold, intervals,

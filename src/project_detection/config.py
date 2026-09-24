@@ -94,6 +94,11 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("model.attribute_prediction_mode must be parallel, chain or adaptive")
     if attribute_mode != "parallel" and backbone == "legacy_hat_efficientnet_b0":
         raise ValueError("Legacy HAT supports only parallel attribute prediction")
+    camera_conditioning = config["model"].get("camera_conditioning", False)
+    if not isinstance(camera_conditioning, bool):
+        raise ValueError("model.camera_conditioning must be true or false")
+    if camera_conditioning and backbone == "legacy_hat_efficientnet_b0":
+        raise ValueError("model.camera_conditioning is unsupported with the legacy HAT backbone")
     threshold = config["model"].get("chain_reliability_threshold", 0.2)
     if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or threshold <= 0:
         raise ValueError("model.chain_reliability_threshold must be positive")
