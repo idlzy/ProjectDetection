@@ -13,11 +13,22 @@ from .geometry import build_targets, load_front_left_calibration
 from .preprocessing import normalize_image
 
 
+def _record_ann_batch(record):
+    ann_batch = record.get("ann_batch")
+    if ann_batch:
+        return ann_batch
+    split_group = record.get("split_group") or ""
+    if split_group.startswith("ONCE_cam"):
+        return split_group.split("__", 1)[0]
+    return None
+
+
 class Mw3dReadyDataset(Dataset):
     def __init__(self, data_root: str, ready_root: Optional[str], split: str, classes: List[str],
                  image_size=(512, 896), max_samples: Optional[int] = None,
                  image_mean=(128.0, 128.0, 128.0), image_std=(128.0, 128.0, 128.0),
-                 pad_value=(0.0, 0.0, 0.0)) -> None:
+                 pad_value=(0.0, 0.0, 0.0),
+                 ann_batches: Optional[List[str]] = None) -> None:
         self.data_root = Path(data_root)
         # Local datasets may keep frames.jsonl, splits/, images/ and annotation/
         # under one root. The separate ready_root remains supported for the
@@ -45,7 +56,6 @@ class Mw3dReadyDataset(Dataset):
             raise FileNotFoundError("Missing split manifest: %s" % manifest)
         with manifest.open("r", encoding="utf-8") as handle:
             self.records = [json.loads(line) for line in handle if line.strip()]
-        self.available_samples = len(self.records)
         required_fields = ("image_rel", "ann_rel", "calib_rel")
         for index, record in enumerate(self.records):
             missing = [key for key in required_fields if not record.get(key)]
@@ -54,6 +64,18 @@ class Mw3dReadyDataset(Dataset):
                     "Invalid record %d in %s; missing: %s"
                     % (index + 1, manifest, ", ".join(missing))
                 )
+        if ann_batches is not None:
+            selected = set(ann_batches)
+            self.records = [
+                record for record in self.records
+                if _record_ann_batch(record) in selected
+            ]
+            if not self.records:
+                raise ValueError(
+                    "No %s manifest records match data.ann_batches: %s"
+                    % (split, ", ".join(ann_batches))
+                )
+        self.available_samples = len(self.records)
         if max_samples is not None:
             self.records = self.records[: int(max_samples)]
         self.manifest_extrinsic_samples = sum(
@@ -121,7 +143,7 @@ class Mw3dReadyDataset(Dataset):
         )
         target["image_size"] = torch.tensor([target_h, target_w], dtype=torch.int64)
         target["sample_token"] = record.get("sample_token", record.get("stem", str(index)))
-        target["ann_batch"] = record.get("ann_batch", record.get("split_group", "unknown"))
+        target["ann_batch"] = _record_ann_batch(record) or record.get("split_group", "unknown")
         target["split_group"] = record.get("split_group", target["ann_batch"])
         target["image_path"] = str(image_path)
         target["calibration_source"] = (

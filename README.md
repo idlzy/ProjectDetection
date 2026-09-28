@@ -254,6 +254,21 @@ CUDA_VISIBLE_DEVICES=0 scripts/start_train.sh \
   --config configs/experiments/fcos3d_full_pgd.yaml
 ```
 
+若只使用指定标注批次训练、验证和测试，在配置的 `data` 下设置 `ann_batches`，
+名称须与对应 split 清单中的 `ann_batch` 完全一致；ONCE 记录没有该字段时，
+可使用从 `split_group` 提取的 `ONCE_cam01`、`ONCE_cam03`；`null` 表示使用全部数据：
+
+```yaml
+data:
+  ann_batches: [D100-1725_re]
+```
+
+筛选先于 `runtime.max_train_samples` / `runtime.max_val_samples` /
+`runtime.max_test_samples`；选用的 split 没有匹配样本时会报错。
+`run_test_viz_and_eval.sh` 的可视化和指标评估都会使用这个筛选结果，测试报告元数据
+也会记录选用的批次。修改筛选范围后应作为新实验训练，不要复用旧实验的
+`train.resume`，因为每个 epoch 的步数和学习率调度可能改变。
+
 完整 PGD 使用新的 `conv_geo_weight` 参数，不能严格加载 PGDA checkpoint。若需要
 用已有 PGDA 权重初始化，应先通过 checkpoint 转换工具忽略新增分支，并从新的
 optimizer 状态开始训练，不能把它作为 `train.resume` 使用。

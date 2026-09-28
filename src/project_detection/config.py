@@ -48,6 +48,23 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("Missing config sections: %s" % ", ".join(missing))
     if len(config["data"]["classes"]) < 1:
         raise ValueError("data.classes must not be empty")
+    ann_batches = config["data"].get("ann_batches")
+    if ann_batches is not None:
+        if (
+            not isinstance(ann_batches, list)
+            or not ann_batches
+            or any(
+                not isinstance(batch, str)
+                or not batch.strip()
+                or batch != batch.strip()
+                for batch in ann_batches
+            )
+            or len(ann_batches) != len(set(ann_batches))
+        ):
+            raise ValueError(
+                "data.ann_batches must be null or a non-empty list of unique, "
+                "non-blank ann_batch names"
+            )
     for key in ("image_mean", "image_std", "pad_value"):
         if key in config["data"] and len(config["data"][key]) != 3:
             raise ValueError("data.%s must contain three channel values" % key)
@@ -201,13 +218,13 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("evaluation.depth_bins must contain increasing [min, max] pairs")
     if config["train"].get("validate_every", 1) < 1:
         raise ValueError("train.validate_every must be at least 1")
-    val_log_every = config["runtime"].get("val_log_every", 10)
+    val_log_every = config["runtime"].get("val_log_every", 0)
     if (
         not isinstance(val_log_every, int)
         or isinstance(val_log_every, bool)
-        or val_log_every < 1
+        or val_log_every < 0
     ):
-        raise ValueError("runtime.val_log_every must be a positive integer")
+        raise ValueError("runtime.val_log_every must be a non-negative integer")
     pretrain = config["train"].get("pretrain")
     resume = config["train"].get("resume")
     if pretrain and resume:
@@ -291,6 +308,10 @@ def validate_config(config: Dict[str, Any]) -> None:
         )
     if config["runtime"].get("log_every", 1) < 1:
         raise ValueError("runtime.log_every must be at least 1")
+    if not isinstance(
+        config["runtime"].get("warn_on_nms_truncation", False), bool
+    ):
+        raise ValueError("runtime.warn_on_nms_truncation must be true or false")
     distributed_backend = config["runtime"].get("distributed_backend", "nccl")
     if distributed_backend != "nccl":
         raise ValueError("runtime.distributed_backend must be nccl")

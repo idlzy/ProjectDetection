@@ -61,6 +61,7 @@ def main():
             "split": args.split,
             "split_manifest": str(split_manifest),
             "split_manifest_sha256": sha256_file(split_manifest),
+            "ann_batches": config["data"].get("ann_batches"),
             "score_threshold": config["evaluation"]["score_threshold"],
             "distance_thresholds": config["evaluation"]["distance_thresholds"],
             "head_level_stats": args.head_level_stats,

@@ -226,6 +226,7 @@ def build_loader(config, split, world_size=1, max_samples=None, rank=0):
         image_mean=data.get("image_mean", (128.0, 128.0, 128.0)),
         image_std=data.get("image_std", (128.0, 128.0, 128.0)),
         pad_value=data.get("pad_value", (0.0, 0.0, 0.0)),
+        ann_batches=data.get("ann_batches"),
     )
     sampler = None
     if world_size > 1 and split == "train":
@@ -479,7 +480,7 @@ def evaluate(model, loader, config, device, logger=None):
         if adaptive and cop_ablation else {}
     )
     local_cop_state = _cop_state(config) if adaptive and cop_stats_enabled else None
-    log_every = config["runtime"].get("val_log_every", 10)
+    log_every = config["runtime"].get("val_log_every", 0)
     batch_finished = time.perf_counter()
     for step, (images, targets) in enumerate(loader):
         batch_started = time.perf_counter()
@@ -543,7 +544,9 @@ def evaluate(model, loader, config, device, logger=None):
                 stats["invalid_before_decode"],
                 stats["invalid_after_decode"],
             )
-        if stats["nms_truncated"]:
+        if stats["nms_truncated"] and config["runtime"].get(
+            "warn_on_nms_truncation", False
+        ):
             logger.warning(
                 "Validation NMS candidates truncated | batch=%d/%d | "
                 "samples=%s | nms_input=%d truncated=%d",
@@ -553,7 +556,7 @@ def evaluate(model, loader, config, device, logger=None):
                 stats["nms_input"],
                 stats["nms_truncated"],
             )
-        should_log = (
+        should_log = log_every > 0 and (
             step % log_every == 0 or step + 1 == len(loader)
         )
         if should_log:
