@@ -13,6 +13,11 @@ _CORNER_SIGNS = (
     (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1),
 )
 
+# Beyond this normalized ray, a corner is far outside the calibrated image
+# while the cubic distortion polynomial can overflow even in float32.
+_MAX_NORMALIZED_COORD = 10.0
+_MAX_PROJECTED_PIXEL = 1e6
+
 
 def project_predicted_boxes_with_gt_depth(
     centers2d, predicted_depth, gt_depth, dimensions, yaw,
@@ -38,7 +43,13 @@ def project_predicted_boxes_with_gt_depth(
     camera_matrix = camera_matrix.to(centers2d)
     if distortion is not None:
         distortion = distortion.to(centers2d)
-    ray_x, ray_y = undistort_points(centers2d, camera_matrix, distortion)
+    principal = torch.stack((camera_matrix[0, 2], camera_matrix[1, 2]))
+    focal = torch.stack((camera_matrix[0, 0], camera_matrix[1, 1]))
+    center_rays = (centers2d - principal) / focal
+    valid_centers = torch.isfinite(center_rays).all(dim=1)
+    valid_centers &= (center_rays.abs() <= _MAX_NORMALIZED_COORD).all(dim=1)
+    safe_centers = torch.where(valid_centers[:, None], centers2d, principal)
+    ray_x, ray_y = undistort_points(safe_centers, camera_matrix, distortion)
     centers3d = torch.stack(
         (ray_x * predicted_depth, ray_y * predicted_depth, gt_depth), dim=1)
 
@@ -65,9 +76,18 @@ def project_predicted_boxes_with_gt_depth(
         + signs[None, :, 2:3] * dimensions[:, None, 1:2] / 2 * up[None, None, :]
     )
     depth = corners[:, :, 2]
-    valid_corners = depth > 0.1
-    safe_depth = depth.clamp_min(1e-6)
-    x, y = corners[:, :, 0] / safe_depth, corners[:, :, 1] / safe_depth
+    valid_corners = valid_centers[:, None] & (depth > 0.1)
+    valid_corners &= torch.isfinite(corners).all(dim=2)
+    valid_corners &= (
+        corners[:, :, :2].abs()
+        <= depth[:, :, None] * _MAX_NORMALIZED_COORD
+    ).all(dim=2)
+    # Mask before division and distortion, not just before box aggregation:
+    # otherwise a corner behind the camera can create 0 * inf in backward.
+    safe_corners = torch.where(valid_corners[:, :, None], corners, 0.0)
+    safe_depth = torch.where(valid_corners, depth, 1.0)
+    x = safe_corners[:, :, 0] / safe_depth
+    y = safe_corners[:, :, 1] / safe_depth
     if distortion is not None:
         k1, k2, p1, p2, k3, k4, k5, k6 = distortion
         r2 = x.square() + y.square()
@@ -79,13 +99,15 @@ def project_predicted_boxes_with_gt_depth(
         x, y = distorted_x, distorted_y
     pixel_x = camera_matrix[0, 0] * x + camera_matrix[0, 2]
     pixel_y = camera_matrix[1, 1] * y + camera_matrix[1, 2]
-    valid_corners &= torch.isfinite(pixel_x) & torch.isfinite(pixel_y)
-    left = pixel_x.masked_fill(~valid_corners, float("inf")).min(dim=1).values
-    top = pixel_y.masked_fill(~valid_corners, float("inf")).min(dim=1).values
-    right = pixel_x.masked_fill(~valid_corners, float("-inf")).max(dim=1).values
-    bottom = pixel_y.masked_fill(~valid_corners, float("-inf")).max(dim=1).values
+    projected_valid = valid_corners & torch.isfinite(pixel_x) & torch.isfinite(pixel_y)
+    projected_valid &= (pixel_x.abs() <= _MAX_PROJECTED_PIXEL)
+    projected_valid &= (pixel_y.abs() <= _MAX_PROJECTED_PIXEL)
+    left = pixel_x.masked_fill(~projected_valid, float("inf")).min(dim=1).values
+    top = pixel_y.masked_fill(~projected_valid, float("inf")).min(dim=1).values
+    right = pixel_x.masked_fill(~projected_valid, float("-inf")).max(dim=1).values
+    bottom = pixel_y.masked_fill(~projected_valid, float("-inf")).max(dim=1).values
     boxes = torch.stack((left, top, right, bottom), dim=1)
-    valid = (valid_corners.sum(dim=1) >= 2) & torch.isfinite(boxes).all(dim=1)
+    valid = (projected_valid.sum(dim=1) >= 2) & torch.isfinite(boxes).all(dim=1)
     valid &= (right > left) & (bottom > top)
     return boxes, valid
 
