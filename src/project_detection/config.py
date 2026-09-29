@@ -116,6 +116,11 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("model.camera_conditioning must be true or false")
     if camera_conditioning and backbone == "legacy_hat_efficientnet_b0":
         raise ValueError("model.camera_conditioning is unsupported with the legacy HAT backbone")
+    local_constraints = config["model"].get("local_geometric_constraints", False)
+    if not isinstance(local_constraints, bool):
+        raise ValueError("model.local_geometric_constraints must be true or false")
+    if local_constraints and backbone == "legacy_hat_efficientnet_b0":
+        raise ValueError("model.local_geometric_constraints is unsupported with the legacy HAT backbone")
     threshold = config["model"].get("chain_reliability_threshold", 0.2)
     if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or threshold <= 0:
         raise ValueError("model.chain_reliability_threshold must be positive")

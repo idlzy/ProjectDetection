@@ -6,6 +6,7 @@ import torch.nn.functional as functional
 from torch import nn
 
 from .depth_propagation import propagate_geometric_depth
+from .local_geometry import generalized_iou_loss, project_predicted_boxes_with_gt_depth
 from .targets import assign_targets_batch, feature_points, prepare_target_batch
 
 
@@ -21,13 +22,15 @@ def sigmoid_focal_loss(logits, targets, alpha=0.25, gamma=2.0, reduction="sum"):
 class FCOS3DLoss(nn.Module):
     def __init__(self, num_classes, strides, regress_ranges,
                  geometry_config=None, class_names=None,
-                 target_assignment_chunk_size=8, uncertainty_loss_weight=0.1):
+                 target_assignment_chunk_size=8, uncertainty_loss_weight=0.1,
+                 local_geometric_constraints=False):
         super().__init__()
         self.num_classes = num_classes
         self.strides = strides
         self.regress_ranges = regress_ranges
         self.target_assignment_chunk_size = int(target_assignment_chunk_size)
         self.uncertainty_loss_weight = float(uncertainty_loss_weight)
+        self.local_geometric_constraints = bool(local_geometric_constraints)
         self.geometry = geometry_config or {}
         enabled_names = set(self.geometry.get("classes", class_names or []))
         self.geometry_class_ids = {
@@ -59,6 +62,8 @@ class FCOS3DLoss(nn.Module):
         loss_dir = loss_cls.clone()
         loss_center = loss_cls.clone()
         loss_uncertainty = loss_cls.clone()
+        loss_bbox2d = loss_cls.clone()
+        loss_consistency = loss_cls.clone()
         positives = loss_cls.new_zeros(())
         nodes_by_image = [[] for _ in targets]
         prepared_targets = prepare_target_batch(
@@ -119,6 +124,10 @@ class FCOS3DLoss(nn.Module):
                 depth_log_scale = None
                 if prediction.get("depth_log_scale") is not None:
                     depth_log_scale = prediction["depth_log_scale"][image_index].reshape(-1)[positive]
+                bbox2d = None
+                if self.local_geometric_constraints:
+                    bbox2d = prediction["bbox2d"][image_index].permute(1, 2, 0)
+                    bbox2d = bbox2d.reshape(-1, 4)[positive]
                 nodes_by_image[image_index].append({
                     "raw": raw,
                     "target": regression_target[positive],
@@ -129,6 +138,9 @@ class FCOS3DLoss(nn.Module):
                     "depth_logits": depth_logits,
                     "geo_weight": geo_weight,
                     "depth_log_scale": depth_log_scale,
+                    "bbox2d": bbox2d,
+                    "points": points[positive],
+                    "strides": raw.new_full((raw.shape[0],), float(stride)),
                     "centers2d": points[positive] + raw[:, :2] * float(stride),
                     "class_probabilities": image_cls_logits[positive].sigmoid(),
                     "labels": labels[positive],
@@ -199,6 +211,52 @@ class FCOS3DLoss(nn.Module):
                 ).mul(center_target.float()).sum()
             loss_size = loss_size + box_loss[:, 3:6].sum()
             loss_yaw = loss_yaw + box_loss[:, 6].sum()
+            if self.local_geometric_constraints:
+                points = torch.cat([chunk["points"] for chunk in chunks])
+                strides = torch.cat([chunk["strides"] for chunk in chunks])
+                matched = torch.cat([chunk["instance_ids"] for chunk in chunks])
+                predicted_ltrb = torch.cat([chunk["bbox2d"] for chunk in chunks])
+                target_meta = targets[image_index]
+                gt_boxes2d = target_meta["boxes2d"].to(points)[matched]
+                target_ltrb = torch.stack((
+                    points[:, 0] - gt_boxes2d[:, 0],
+                    points[:, 1] - gt_boxes2d[:, 1],
+                    gt_boxes2d[:, 2] - points[:, 0],
+                    gt_boxes2d[:, 3] - points[:, 1],
+                ), dim=1) / strides[:, None]
+                loss_bbox2d = loss_bbox2d + functional.smooth_l1_loss(
+                    predicted_ltrb, target_ltrb, beta=1.0 / 9.0,
+                    reduction="sum",
+                )
+                pixel_ltrb = predicted_ltrb * strides[:, None]
+                predicted_boxes2d = torch.stack((
+                    points[:, 0] - pixel_ltrb[:, 0],
+                    points[:, 1] - pixel_ltrb[:, 1],
+                    points[:, 0] + pixel_ltrb[:, 2],
+                    points[:, 1] + pixel_ltrb[:, 3],
+                ), dim=1)
+                gt_depth = target_meta["boxes3d"].to(points)[matched, 2]
+                projected_boxes2d, projection_valid = (
+                    project_predicted_boxes_with_gt_depth(
+                        centers2d=torch.cat(
+                            [chunk["centers2d"] for chunk in chunks]
+                        ).float(),
+                        predicted_depth=depth.float(),
+                        gt_depth=gt_depth.float(),
+                        dimensions=decoded[:, 3:6].float(),
+                        yaw=decoded[:, 6].float(),
+                        camera_matrix=target_meta["camera_matrix"],
+                        distortion=target_meta.get("distortion"),
+                        camera_to_vehicle_rotation=target_meta.get(
+                            "camera_to_vehicle_rotation"
+                        ),
+                    )
+                )
+                if projection_valid.any():
+                    loss_consistency = loss_consistency + generalized_iou_loss(
+                        projected_boxes2d[projection_valid],
+                        predicted_boxes2d[projection_valid].float(),
+                    ).sum()
             if depth_logits is not None:
                 depth_centers = head.depth_centers.to(depth_logits)
                 depth_bin_target = (
@@ -241,5 +299,8 @@ class FCOS3DLoss(nn.Module):
             losses["loss_uncertainty"] = (
                 self.uncertainty_loss_weight * loss_uncertainty / normalizer
             )
+        if self.local_geometric_constraints:
+            losses["loss_bbox2d"] = loss_bbox2d / normalizer
+            losses["loss_consistency"] = loss_consistency / normalizer
         losses["loss_total"] = sum(losses.values())
         return losses

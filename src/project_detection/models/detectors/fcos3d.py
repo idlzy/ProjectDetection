@@ -36,10 +36,13 @@ class FCOS3D(nn.Module):
         attribute_prediction_mode="parallel",
         chain_reliability_threshold=0.2,
         camera_conditioning=False,
+        local_geometric_constraints=False,
     ):
         super().__init__()
         if camera_conditioning and backbone == "legacy_hat_efficientnet_b0":
             raise ValueError("Camera conditioning is not supported by the legacy HAT head")
+        if local_geometric_constraints and backbone == "legacy_hat_efficientnet_b0":
+            raise ValueError("Local geometric constraints are not supported by the legacy HAT head")
         self.camera_conditioning = camera_conditioning
         if attribute_prediction_mode != "parallel" and backbone == "legacy_hat_efficientnet_b0":
             raise ValueError("Legacy HAT supports only parallel attribute prediction")
@@ -97,6 +100,7 @@ class FCOS3D(nn.Module):
                 attribute_prediction_mode=attribute_prediction_mode,
                 chain_reliability_threshold=chain_reliability_threshold,
                 camera_conditioning=camera_conditioning,
+                local_geometric_constraints=local_geometric_constraints,
             )
 
     def forward(self, images, camera_matrices=None):

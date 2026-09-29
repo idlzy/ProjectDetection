@@ -128,6 +128,7 @@ class FCOS3DHead(nn.Module):
         attribute_prediction_mode="parallel",
         chain_reliability_threshold=0.2,
         camera_conditioning=False,
+        local_geometric_constraints=False,
     ):
         super().__init__()
         if attribute_prediction_mode not in ("parallel", "chain", "adaptive"):
@@ -138,6 +139,7 @@ class FCOS3DHead(nn.Module):
         self.attribute_prediction_mode = attribute_prediction_mode
         self.chain_reliability_threshold = chain_reliability_threshold
         self.camera_conditioning = camera_conditioning
+        self.local_geometric_constraints = local_geometric_constraints
         self.num_levels = 5
         self.group_reg_dims = (2, 1, 3, 1)
         self.register_buffer(
@@ -183,6 +185,10 @@ class FCOS3DHead(nn.Module):
                 for index in range(len(self.group_reg_dims))
             ]
         )
+        self.bbox2d_branch = (
+            _MultiLevelTower(feat_channels, feat_channels, 1, **branch_options)
+            if local_geometric_constraints else None
+        )
         self.camera_film = (
             nn.Sequential(
                 nn.Linear(4, 64),
@@ -212,6 +218,10 @@ class FCOS3DHead(nn.Module):
         self.conv_cls = nn.Conv2d(feat_channels, num_classes, 1)
         self.conv_regs = nn.ModuleList(
             [nn.Conv2d(feat_channels, dimension, 1) for dimension in self.group_reg_dims]
+        )
+        self.conv_bbox2d = (
+            nn.Conv2d(feat_channels, 4, 1)
+            if local_geometric_constraints else None
         )
         self.conv_dir = nn.Conv2d(feat_channels, 2, 1)
         self.conv_attr = nn.Conv2d(feat_channels, num_attrs, 1)
@@ -331,6 +341,10 @@ class FCOS3DHead(nn.Module):
                     self.centerness_branch(reg_feature, level)
                 ),
             }
+            if self.conv_bbox2d is not None:
+                common["bbox2d"] = torch.nn.functional.relu(
+                    self.conv_bbox2d(self.bbox2d_branch(reg_feature, level))
+                )
             active = self._predict_attributes(
                 regression_features, direction_input, level
             )

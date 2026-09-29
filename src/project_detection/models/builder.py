@@ -28,4 +28,5 @@ def build_model(config):
         attribute_prediction_mode=model.get("attribute_prediction_mode", "parallel"),
         chain_reliability_threshold=model.get("chain_reliability_threshold", 0.2),
         camera_conditioning=model.get("camera_conditioning", False),
+        local_geometric_constraints=model.get("local_geometric_constraints", False),
     )
