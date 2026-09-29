@@ -196,23 +196,51 @@ class FCOS3DPostProcessor:
                 "cop_final_by_level": [],
             }
             raws, local_depths, depth_confidences = [], [], []
-            centers, scores, labels, class_probabilities, geo_weights = [], [], [], [], []
+            centers, scores, rank_scores, labels = [], [], [], []
+            class_probabilities, geo_weights = [], []
             source_levels, level_candidate_counts = [], []
             chain_selections, parallel_log_scales, chain_log_scales = [], [], []
             for level_index, (prediction, stride) in enumerate(zip(outputs, self.strides)):
                 cls = prediction["cls"][image_index].sigmoid()
                 center = prediction["centerness"][image_index].sigmoid()
-                combined = torch.sqrt(cls * center)
+                # HAT reports cls * centerness; depth confidence only ranks
+                # candidates for preselection, NMS, and max-per-image.
+                combined = cls * center
+                height, width = cls.shape[-2:]
+                bbox_channels = prediction["bbox"].shape[1]
+                all_raw = (
+                    prediction["bbox"][image_index]
+                    .permute(1, 2, 0)
+                    .reshape(-1, bbox_channels)
+                )
+                depth_logits = prediction.get("depth_logits")
+                all_probability = None
+                if depth_logits is not None:
+                    all_probability = (
+                        depth_logits[image_index]
+                        .permute(1, 2, 0)
+                        .reshape(-1, depth_logits.shape[1])
+                    )
+                all_depth, all_depth_confidence = (
+                    self.model.head.decode_depth_candidates(
+                        all_raw[:, 2], all_probability
+                    )
+                )
+                ranking = combined * all_depth_confidence.reshape(1, height, width)
                 if len(self.evaluation_class_ids) != cls.shape[0]:
                     enabled = torch.zeros(cls.shape[0], dtype=torch.bool, device=cls.device)
                     enabled[list(self.evaluation_class_ids)] = True
                     combined = combined.masked_fill(~enabled[:, None, None], -1.0)
-                flat_scores, flat_indices = combined.flatten().topk(min(self.nms_pre, combined.numel()))
+                    ranking = ranking.masked_fill(~enabled[:, None, None], -1.0)
+                flat_rank, flat_indices = ranking.flatten().topk(
+                    min(self.nms_pre, ranking.numel())
+                )
+                flat_scores = combined.flatten()[flat_indices]
                 keep = flat_scores >= self.score_threshold
-                flat_scores, flat_indices = flat_scores[keep], flat_indices[keep]
+                flat_scores = flat_scores[keep]
+                flat_rank, flat_indices = flat_rank[keep], flat_indices[keep]
                 level_candidate_counts.append(int(flat_scores.numel()))
                 if not keep.any(): continue
-                height, width = cls.shape[-2:]
                 class_ids = flat_indices // (height * width)
                 locations = flat_indices % (height * width)
                 chain_selected = prediction.get("chain_selected")
@@ -229,18 +257,9 @@ class FCOS3DPostProcessor:
                         "total": int(chain_selected.numel()),
                         "chain": int(chain_selected.sum().item()),
                     })
-                bbox_channels = prediction["bbox"].shape[1]
-                raw = (
-                    prediction["bbox"][image_index]
-                    .permute(1, 2, 0)
-                    .reshape(-1, bbox_channels)[locations]
-                )
-                probability = None
-                if prediction["depth_logits"] is not None:
-                    probability = prediction["depth_logits"][image_index].permute(1, 2, 0).reshape(-1, prediction["depth_logits"].shape[1])[locations]
-                local_depth, depth_confidence = self.model.head.decode_depth_candidates(
-                    raw[:, 2], probability
-                )
+                raw = all_raw[locations]
+                local_depth = all_depth[locations]
+                depth_confidence = all_depth_confidence[locations]
                 points = feature_points(height, width, stride, raw.device)[locations]
                 centers2d = points + raw[:, :2] * stride
                 cls_vectors = cls.permute(1, 2, 0).reshape(-1, cls.shape[0])[locations]
@@ -253,7 +272,9 @@ class FCOS3DPostProcessor:
                 centers.append(centers2d)
                 class_probabilities.append(cls_vectors)
                 if geo_weight is not None: geo_weights.append(geo_weight)
-                scores.append(flat_scores); labels.append(class_ids)
+                scores.append(flat_scores)
+                rank_scores.append(flat_rank)
+                labels.append(class_ids)
                 source_levels.append(torch.full_like(class_ids, level_index))
                 if chain_selected is not None:
                     chain_selections.append(chain_selected)
@@ -271,7 +292,9 @@ class FCOS3DPostProcessor:
             depth_confidence = torch.cat(depth_confidences)
             centers2d = torch.cat(centers)
             class_vectors = torch.cat(class_probabilities)
-            scores = torch.cat(scores); labels = torch.cat(labels)
+            scores = torch.cat(scores)
+            ranking = torch.cat(rank_scores)
+            labels = torch.cat(labels)
             source_levels = torch.cat(source_levels)
             geo_weight = torch.cat(geo_weights) if geo_weights else None
             chain_selected = (
@@ -294,6 +317,7 @@ class FCOS3DPostProcessor:
                 & torch.isfinite(centers2d).all(dim=1)
                 & torch.isfinite(class_vectors).all(dim=1)
                 & torch.isfinite(scores)
+                & torch.isfinite(ranking)
                 & (local_depth >= self.min_depth)
                 & (local_depth <= self.max_depth)
                 & (raw[:, 3:6] >= min_dimension_log).all(dim=1)
@@ -315,6 +339,7 @@ class FCOS3DPostProcessor:
                     "centers2d": centers2d,
                     "class_vectors": class_vectors,
                     "scores": scores,
+                    "ranking": ranking,
                     "labels": labels,
                     "source_levels": source_levels,
                     "geo_weight": geo_weight,
@@ -330,6 +355,7 @@ class FCOS3DPostProcessor:
             centers2d = selected_values["centers2d"]
             class_vectors = selected_values["class_vectors"]
             scores = selected_values["scores"]
+            ranking = selected_values["ranking"]
             labels = selected_values["labels"]
             source_levels = selected_values["source_levels"]
             geo_weight = selected_values["geo_weight"]
@@ -394,6 +420,7 @@ class FCOS3DPostProcessor:
                     "boxes3d": boxes3d,
                     "image_boxes": image_boxes,
                     "scores": scores,
+                    "ranking": ranking,
                     "labels": labels,
                     "depth_confidence": depth_confidence,
                     "source_levels": source_levels,
@@ -410,6 +437,7 @@ class FCOS3DPostProcessor:
             boxes3d = selected_values["boxes3d"]
             image_boxes = selected_values["image_boxes"]
             scores = selected_values["scores"]
+            ranking = selected_values["ranking"]
             labels = selected_values["labels"]
             depth_confidence = selected_values["depth_confidence"]
             source_levels = selected_values["source_levels"]
@@ -428,9 +456,9 @@ class FCOS3DPostProcessor:
                         "total": int(level_mask.sum().item()),
                         "chain": int(chain_selected[level_mask].sum().item()),
                     })
-            kept, nms_stats = self._nms(boxes3d, scores, labels)
+            kept, nms_stats = self._nms(boxes3d, ranking, labels)
             stats.update(nms_stats)
-            kept = kept[scores[kept].argsort(descending=True)[:self.max_per_image]]
+            kept = kept[ranking[kept].argsort(descending=True)[:self.max_per_image]]
             if chain_selected is not None:
                 for level_index in range(len(self.strides)):
                     level_mask = source_levels[kept] == level_index

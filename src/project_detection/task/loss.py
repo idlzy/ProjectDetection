@@ -196,7 +196,8 @@ class FCOS3DLoss(nn.Module):
             decoded[:, 3:6] = raw[:, 3:6].exp()
             regression_target = regression_target[:, : decoded.shape[1]]
             box_loss = functional.smooth_l1_loss(
-                decoded, regression_target, beta=1.0/9.0, reduction="none"
+                decoded[:, :6], regression_target[:, :6],
+                beta=1.0/9.0, reduction="none"
             )
             box_loss = box_loss * center_target[:, None]
             loss_offset = loss_offset + box_loss[:, 0:2].sum()
@@ -210,7 +211,12 @@ class FCOS3DLoss(nn.Module):
                     (2.0 ** 0.5) * residual * (-log_scale).exp() + log_scale
                 ).mul(center_target.float()).sum()
             loss_size = loss_size + box_loss[:, 3:6].sum()
-            loss_yaw = loss_yaw + box_loss[:, 6].sum()
+            yaw_pred = torch.sin(decoded[:, 6]) * torch.cos(regression_target[:, 6])
+            yaw_target = torch.cos(decoded[:, 6]) * torch.sin(regression_target[:, 6])
+            yaw_loss = functional.smooth_l1_loss(
+                yaw_pred, yaw_target, beta=1.0/9.0, reduction="none"
+            )
+            loss_yaw = loss_yaw + (yaw_loss * center_target).sum()
             if self.local_geometric_constraints:
                 points = torch.cat([chunk["points"] for chunk in chunks])
                 strides = torch.cat([chunk["strides"] for chunk in chunks])
@@ -223,40 +229,47 @@ class FCOS3DLoss(nn.Module):
                     points[:, 1] - gt_boxes2d[:, 1],
                     gt_boxes2d[:, 2] - points[:, 0],
                     gt_boxes2d[:, 3] - points[:, 1],
-                ), dim=1) / strides[:, None]
-                loss_bbox2d = loss_bbox2d + functional.smooth_l1_loss(
-                    predicted_ltrb, target_ltrb, beta=1.0 / 9.0,
-                    reduction="sum",
-                )
-                pixel_ltrb = predicted_ltrb * strides[:, None]
-                predicted_boxes2d = torch.stack((
-                    points[:, 0] - pixel_ltrb[:, 0],
-                    points[:, 1] - pixel_ltrb[:, 1],
-                    points[:, 0] + pixel_ltrb[:, 2],
-                    points[:, 1] + pixel_ltrb[:, 3],
                 ), dim=1)
-                gt_depth = target_meta["boxes3d"].to(points)[matched, 2]
-                projected_boxes2d, projection_valid = (
-                    project_predicted_boxes_with_gt_depth(
-                        centers2d=torch.cat(
-                            [chunk["centers2d"] for chunk in chunks]
-                        ).float(),
-                        predicted_depth=depth.float(),
-                        gt_depth=gt_depth.float(),
-                        dimensions=decoded[:, 3:6].float(),
-                        yaw=decoded[:, 6].float(),
-                        camera_matrix=target_meta["camera_matrix"],
-                        distortion=target_meta.get("distortion"),
-                        camera_to_vehicle_rotation=target_meta.get(
-                            "camera_to_vehicle_rotation"
-                        ),
+                # HAT permits positives outside the 2D GT box, but the
+                # nonnegative bbox2d head cannot regress their signed ltrb.
+                inside_gt_box = (target_ltrb > 0).all(dim=1)
+                if inside_gt_box.any():
+                    target_ltrb = target_ltrb[inside_gt_box] / strides[inside_gt_box, None]
+                    predicted_ltrb = predicted_ltrb[inside_gt_box]
+                    loss_bbox2d = loss_bbox2d + functional.smooth_l1_loss(
+                        predicted_ltrb, target_ltrb, beta=1.0 / 9.0,
+                        reduction="sum",
                     )
-                )
-                if projection_valid.any():
-                    loss_consistency = loss_consistency + generalized_iou_loss(
-                        projected_boxes2d[projection_valid],
-                        predicted_boxes2d[projection_valid].float(),
-                    ).sum()
+                    inside_points = points[inside_gt_box]
+                    pixel_ltrb = predicted_ltrb * strides[inside_gt_box, None]
+                    predicted_boxes2d = torch.stack((
+                        inside_points[:, 0] - pixel_ltrb[:, 0],
+                        inside_points[:, 1] - pixel_ltrb[:, 1],
+                        inside_points[:, 0] + pixel_ltrb[:, 2],
+                        inside_points[:, 1] + pixel_ltrb[:, 3],
+                    ), dim=1)
+                    gt_depth = target_meta["boxes3d"].to(points)[matched[inside_gt_box], 2]
+                    projected_boxes2d, projection_valid = (
+                        project_predicted_boxes_with_gt_depth(
+                            centers2d=torch.cat(
+                                [chunk["centers2d"] for chunk in chunks]
+                            )[inside_gt_box].float(),
+                            predicted_depth=depth[inside_gt_box].float(),
+                            gt_depth=gt_depth.float(),
+                            dimensions=decoded[inside_gt_box, 3:6].float(),
+                            yaw=decoded[inside_gt_box, 6].float(),
+                            camera_matrix=target_meta["camera_matrix"],
+                            distortion=target_meta.get("distortion"),
+                            camera_to_vehicle_rotation=target_meta.get(
+                                "camera_to_vehicle_rotation"
+                            ),
+                        )
+                    )
+                    if projection_valid.any():
+                        loss_consistency = loss_consistency + generalized_iou_loss(
+                            projected_boxes2d[projection_valid],
+                            predicted_boxes2d[projection_valid].float(),
+                        ).sum()
             if depth_logits is not None:
                 depth_centers = head.depth_centers.to(depth_logits)
                 depth_bin_target = (

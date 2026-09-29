@@ -32,35 +32,39 @@ def _target_assignment_geometry(points, targets, regress_range, stride, center_r
     right = boxes[:, 2] - px
     bottom = boxes[:, 3] - py
     distances = torch.stack([left, top, right, bottom], dim=2)
-    inside_box = distances.min(dim=2).values > 0
     max_distance = distances.max(dim=2).values
     in_range = (max_distance >= regress_range[0]) & (
         max_distance <= regress_range[1]
     )
     radius = stride * center_radius
-    center_ok = (px - centers[:, 0]).abs() <= radius
-    center_ok &= (py - centers[:, 1]).abs() <= radius
-    valid = inside_box & in_range & center_ok
+    center_ok = (px - centers[:, 0]).abs() < radius
+    center_ok &= (py - centers[:, 1]).abs() < radius
+    valid = in_range & center_ok
     return boxes, centers, distances, valid
 
 
-def _match_target_candidates(boxes, valid):
-    """Resolve point-to-GT candidates with the same smallest-area rule as FCOS."""
+def _match_target_candidates(points, centers, valid):
+    """Resolve candidate conflicts by distance to the projected 3D center."""
     count = valid.shape[0]
     matched_indices = torch.full(
         (count,), -1, dtype=torch.long, device=valid.device
     )
-    if boxes.numel() == 0:
+    if centers.numel() == 0:
         return matched_indices
 
-    areas = (
-        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    ).unsqueeze(0).expand(count, -1)
-    candidate_areas = areas.masked_fill(~valid, float("inf"))
-    min_area, matched = candidate_areas.min(dim=1)
-    positive = torch.isfinite(min_area)
+    distances = torch.sqrt(((points[:, None, :] - centers[None]) ** 2).sum(dim=2))
+    candidate_distances = distances.masked_fill(~valid, float("inf"))
+    min_distance, matched = candidate_distances.min(dim=1)
+    positive = torch.isfinite(min_distance)
     matched_indices[positive] = matched[positive]
     return matched_indices
+
+
+def _center_distance_centerness(points, centers, stride, center_radius):
+    """HAT FCOS3D centerness: exponential decay inside the center region."""
+    distance = torch.sqrt(((points - centers) ** 2).sum(dim=-1))
+    relative_distance = distance / (1.414 * center_radius * float(stride))
+    return torch.exp(-2.5 * relative_distance)
 
 
 def target_assignment_diagnostics(
@@ -69,14 +73,14 @@ def target_assignment_diagnostics(
     """Return candidates before conflict resolution and final GT matches.
 
     The candidate matrix has shape ``[num_points, num_gt]``. A true entry
-    means that the point satisfies the box, regression-range and center
+    means that the point satisfies the regression-range and center
     sampling constraints for that GT. ``matched_indices`` applies the same
-    smallest-area conflict resolution used by :func:`assign_targets`.
+    nearest-center conflict resolution used by :func:`assign_targets`.
     """
-    boxes, _, _, valid = _target_assignment_geometry(
+    _, centers, _, valid = _target_assignment_geometry(
         points, targets, regress_range, stride, center_radius
     )
-    matched_indices = _match_target_candidates(boxes, valid)
+    matched_indices = _match_target_candidates(points, centers, valid)
     return valid, matched_indices
 
 
@@ -86,10 +90,10 @@ def assign_targets(points, targets, regress_range, stride, center_radius=1.5):
     regression = torch.zeros((count, 9), device=device)
     centerness = torch.zeros((count,), device=device)
     direction = torch.zeros((count,), dtype=torch.long, device=device)
-    boxes, centers, distances, valid = _target_assignment_geometry(
+    boxes, centers, _, valid = _target_assignment_geometry(
         points, targets, regress_range, stride, center_radius
     )
-    matched_indices = _match_target_candidates(boxes, valid)
+    matched_indices = _match_target_candidates(points, centers, valid)
     if boxes.numel() == 0:
         return labels, regression, centerness, direction, matched_indices
     boxes3d = targets["boxes3d"].to(device)
@@ -102,11 +106,9 @@ def assign_targets(points, targets, regress_range, stride, center_radius=1.5):
     matched_indices[positive] = match
     regression[positive, :2] = (centers[match] - points[positive]) / float(stride)
     regression[positive, 2:] = boxes3d[match, 2:]
-    selected = distances[positive, match]
-    lr = selected[:, [0, 2]]; tb = selected[:, [1, 3]]
-    center = torch.sqrt((lr.min(1).values / lr.max(1).values.clamp_min(1e-6)) *
-                        (tb.min(1).values / tb.max(1).values.clamp_min(1e-6)))
-    centerness[positive] = center.pow(2.5)
+    centerness[positive] = _center_distance_centerness(
+        points[positive], centers[match], stride, center_radius
+    )
     yaw = regression[positive, 6]
     direction[positive] = ((yaw - 0.7854) % (2 * math.pi) >= math.pi).long()
     return labels, regression, centerness, direction, matched_indices
@@ -196,23 +198,22 @@ def assign_targets_batch(
             right = boxes[:, None, :, 2] - px
             bottom = boxes[:, None, :, 3] - py
             distances = torch.stack([left, top, right, bottom], dim=3)
-            inside_box = distances.min(dim=3).values > 0
             max_distance = distances.max(dim=3).values
             in_range = (max_distance >= regress_range[0]) & (
                 max_distance <= regress_range[1]
             )
             radius = stride * center_radius
-            center_ok = (px - centers[:, None, :, 0]).abs() <= radius
-            center_ok &= (py - centers[:, None, :, 1]).abs() <= radius
-            valid = inside_box & in_range & center_ok
+            center_ok = (px - centers[:, None, :, 0]).abs() < radius
+            center_ok &= (py - centers[:, None, :, 1]).abs() < radius
+            valid = in_range & center_ok
             valid &= valid_objects[:, None]
-            areas = (
-                (boxes[:, :, 2] - boxes[:, :, 0])
-                * (boxes[:, :, 3] - boxes[:, :, 1])
-            )[:, None].expand(-1, count, -1)
-            candidate_areas = areas.masked_fill(~valid, float("inf"))
-            min_area, matched = candidate_areas.min(dim=2)
-            positive_batch, positive_point = torch.where(torch.isfinite(min_area))
+            center_distances = torch.sqrt(
+                (px - centers[:, None, :, 0]) ** 2
+                + (py - centers[:, None, :, 1]) ** 2
+            )
+            candidate_distances = center_distances.masked_fill(~valid, float("inf"))
+            min_distance, matched = candidate_distances.min(dim=2)
+            positive_batch, positive_point = torch.where(torch.isfinite(min_distance))
             if positive_batch.numel():
                 matched_object = matched[positive_batch, positive_point]
                 labels[positive_batch, positive_point] = gt_labels[
@@ -226,16 +227,14 @@ def assign_targets_batch(
                 regression[positive_batch, positive_point, 2:] = boxes3d[
                     positive_batch, matched_object, 2:
                 ]
-                selected = distances[
-                    positive_batch, positive_point, matched_object
-                ]
-                lr = selected[:, [0, 2]]
-                tb = selected[:, [1, 3]]
-                center = torch.sqrt(
-                    (lr.min(1).values / lr.max(1).values.clamp_min(1e-6))
-                    * (tb.min(1).values / tb.max(1).values.clamp_min(1e-6))
+                centerness[positive_batch, positive_point] = (
+                    _center_distance_centerness(
+                        points[positive_point],
+                        centers[positive_batch, matched_object],
+                        stride,
+                        center_radius,
+                    )
                 )
-                centerness[positive_batch, positive_point] = center.pow(2.5)
                 yaw = regression[positive_batch, positive_point, 6]
                 direction[positive_batch, positive_point] = (
                     (yaw - 0.7854) % (2 * math.pi) >= math.pi

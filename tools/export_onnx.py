@@ -75,7 +75,6 @@ def export_model(config, checkpoint, output, opset=13, overwrite=False):
 
     import onnx
 
-    onnx.checker.check_model(onnx.load(str(output)))
     fuse_logit = model.head.depth_fuse_logit
     metadata = {
         "format": "project_detection_raw_head_v1",
@@ -93,7 +92,44 @@ def export_model(config, checkpoint, output, opset=13, overwrite=False):
         "chain_reliability_threshold": config["model"].get(
             "chain_reliability_threshold", 0.2
         ),
+        "inference_config": {
+            "data": {
+                "image_size": config["data"]["image_size"],
+                "classes": config["data"]["classes"],
+                "color_space": config["data"].get("color_space", "bgr"),
+                "image_mean": config["data"].get("image_mean", [128, 128, 128]),
+                "image_std": config["data"].get("image_std", [128, 128, 128]),
+                "pad_value": config["data"].get("pad_value", [0, 0, 0]),
+            },
+            "model": {
+                "strides": config["model"]["strides"],
+                "depth_mode": config["model"].get("depth_mode", "exp"),
+                "probabilistic_depth": config["model"]["probabilistic_depth"],
+                "geometric_depth": config["model"].get("geometric_depth", False),
+                "depth_bin_unit": config["model"].get("depth_bin_unit", 10.0),
+                "depth_bin_max": config["model"].get("depth_bin_max", 80.0),
+                "attribute_prediction_mode": config["model"].get(
+                    "attribute_prediction_mode", "parallel"
+                ),
+            },
+            "evaluation": {
+                key: value for key, value in config["evaluation"].items()
+                if key in (
+                    "classes", "score_threshold", "nms_pre", "nms_threshold",
+                    "nms_mode", "nms_max_candidates", "max_per_image",
+                    "min_valid_depth", "max_valid_depth",
+                    "min_valid_dimension", "max_valid_dimension",
+                    "max_abs_position", "max_abs_yaw",
+                )
+            },
+        },
     }
+    onnx_model = onnx.load(str(output))
+    onnx.helper.set_model_props(
+        onnx_model, {"project_detection_inference": json.dumps(metadata)}
+    )
+    onnx.checker.check_model(onnx_model)
+    onnx.save(onnx_model, str(output))
     metadata_path.write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
