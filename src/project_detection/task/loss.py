@@ -19,6 +19,26 @@ def sigmoid_focal_loss(logits, targets, alpha=0.25, gamma=2.0, reduction="sum"):
     return loss.sum() if reduction == "sum" else loss.mean()
 
 
+def depth_bin_soft_targets(depth, depth_centers):
+    """Interpolate GT depth between adjacent, strictly increasing bin centers.
+
+    Out-of-range depths are clamped to the endpoint bins. Use FP32 to keep
+    interpolation accurate when the training predictions use mixed precision.
+    """
+    centers = depth_centers.to(device=depth.device, dtype=torch.float32)
+    depth = depth.detach().float().reshape(-1).contiguous()
+    targets = depth.new_zeros((depth.numel(), centers.numel()))
+    if centers.numel() == 1:
+        return targets.fill_(1.0)
+    depth = depth.clamp(min=centers[0], max=centers[-1])
+    upper = torch.searchsorted(centers, depth).clamp(1, centers.numel() - 1)
+    lower = upper - 1
+    upper_weight = (depth - centers[lower]) / (centers[upper] - centers[lower])
+    targets.scatter_add_(1, lower[:, None], (1 - upper_weight)[:, None])
+    targets.scatter_add_(1, upper[:, None], upper_weight[:, None])
+    return targets
+
+
 class FCOS3DLoss(nn.Module):
     def __init__(self, num_classes, strides, regress_ranges,
                  geometry_config=None, class_names=None,
@@ -271,13 +291,13 @@ class FCOS3DLoss(nn.Module):
                             predicted_boxes2d[projection_valid].float(),
                         ).sum()
             if depth_logits is not None:
-                depth_centers = head.depth_centers.to(depth_logits)
-                depth_bin_target = (
-                    regression_target[:, 2:3] - depth_centers[None]
-                ).abs().argmin(dim=1)
-                depth_classification = functional.cross_entropy(
-                    depth_logits, depth_bin_target, reduction="none"
+                depth_bin_target = depth_bin_soft_targets(
+                    regression_target[:, 2], head.depth_centers
                 )
+                depth_classification = -(
+                    depth_bin_target
+                    * functional.log_softmax(depth_logits.float(), dim=1)
+                ).sum(dim=1)
                 loss_depth_cls = loss_depth_cls + (
                     depth_classification * center_target
                 ).sum()
