@@ -328,6 +328,14 @@ def _sigmoid(value):
     return np.exp(-np.logaddexp(0.0, -value))
 
 
+def _decode_global_yaw(raw_yaw, direction_class):
+    """Resolve the pi-periodic yaw regression with the direction bin."""
+    offset = 0.7854
+    yaw = np.remainder(raw_yaw - offset, math.pi) + offset
+    yaw = yaw + direction_class.astype(raw_yaw.dtype) * math.pi
+    return np.remainder(yaw + math.pi, 2.0 * math.pi) - math.pi
+
+
 def _undistort_points(points, k, coefficients, iterations=6):
     xd = (points[:, 0] - k[0, 2]) / k[0, 0]
     yd = (points[:, 1] - k[1, 2]) / k[1, 1]
@@ -444,7 +452,7 @@ def postprocess(outputs, target, config, metadata):
     selected_names = evaluation.get("classes")
     selected_ids = None if selected_names is None else {classes.index(name) for name in selected_names}
     strides = config["model"]["strides"]
-    all_raw, all_depth, all_conf, all_centers = [], [], [], []
+    all_raw, all_direction, all_depth, all_conf, all_centers = [], [], [], [], []
     all_scores, all_rank, all_labels, all_levels = [], [], [], []
     level_counts = []
     for level_index, (prediction, stride) in enumerate(zip(outputs, strides)):
@@ -455,6 +463,9 @@ def postprocess(outputs, target, config, metadata):
         # to rank pre-NMS candidates and final detections.
         combined = cls * center
         all_level_raw = prediction["bbox"][0].transpose(1, 2, 0).reshape(-1, prediction["bbox"].shape[1])
+        all_level_direction = prediction["direction"][0].transpose(1, 2, 0).reshape(
+            -1, prediction["direction"].shape[1]
+        )
         logits = prediction["depth_logits"]
         all_probability = None if logits is None else logits[0].transpose(1, 2, 0).reshape(-1, logits.shape[1])
         level_depth, level_confidence = _depth_candidates(all_level_raw, all_probability, config, metadata)
@@ -478,11 +489,13 @@ def postprocess(outputs, target, config, metadata):
         class_ids = top // (height * width)
         locations = top % (height * width)
         raw = all_level_raw[locations]
+        direction_logits = all_level_direction[locations]
         local_depth, depth_confidence = level_depth[locations], level_confidence[locations]
         points = np.column_stack((((locations % width) + 0.5) * stride,
                                   ((locations // width) + 0.5) * stride))
         centers = points + raw[:, :2] * stride
-        valid = (np.isfinite(raw).all(axis=1) & np.isfinite(local_depth) &
+        valid = (np.isfinite(raw).all(axis=1) & np.isfinite(direction_logits).all(axis=1) &
+                 np.isfinite(local_depth) &
                  np.isfinite(depth_confidence) & np.isfinite(centers).all(axis=1) &
                  np.isfinite(flattened[top]) &
                  np.isfinite(flattened_rank[top]) &
@@ -493,7 +506,9 @@ def postprocess(outputs, target, config, metadata):
                  (np.abs(raw[:, 6]) <= evaluation.get("max_abs_yaw", 100.0 * math.pi)))
         if not valid.any():
             continue
-        all_raw.append(raw[valid]); all_depth.append(local_depth[valid])
+        all_raw.append(raw[valid])
+        all_direction.append(direction_logits[valid].argmax(axis=1))
+        all_depth.append(local_depth[valid])
         all_conf.append(depth_confidence[valid]); all_centers.append(centers[valid])
         all_scores.append(flattened[top][valid]); all_labels.append(class_ids[valid])
         all_rank.append(flattened_rank[top][valid])
@@ -503,6 +518,7 @@ def postprocess(outputs, target, config, metadata):
     if not all_raw:
         return result
     raw = np.concatenate(all_raw)
+    direction_class = np.concatenate(all_direction)
     z = np.concatenate(all_depth)
     centers = np.concatenate(all_centers)
     scores = np.concatenate(all_scores)
@@ -513,8 +529,9 @@ def postprocess(outputs, target, config, metadata):
     k = target["camera_matrix"]
     norm_x, norm_y = _undistort_points(centers, k, target["dist"])
     dimensions = np.exp(raw[:, 3:6])
+    yaw = _decode_global_yaw(raw[:, 6], direction_class)
     boxes = np.column_stack((norm_x * z, norm_y * z, z, dimensions,
-                             raw[:, 6], np.zeros((len(raw), 2), dtype=np.float32)))
+                             yaw, np.zeros((len(raw), 2), dtype=np.float32)))
     half_w = k[0, 0] * dimensions[:, 2] / np.maximum(z, 1e-3) / 2
     half_h = k[1, 1] * dimensions[:, 1] / np.maximum(z, 1e-3) / 2
     image_boxes = np.column_stack((centers[:, 0] - half_w, centers[:, 1] - half_h,

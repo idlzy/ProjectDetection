@@ -12,6 +12,19 @@ from .targets import feature_points
 
 _DEFAULT_NMS_MAX_CANDIDATES = 1000
 
+_DIRECTION_OFFSET = 0.7854
+
+
+def _decode_global_yaw(raw_yaw, direction_class):
+    """Resolve the pi-periodic yaw regression with the direction bin."""
+    yaw = (
+        torch.remainder(raw_yaw - _DIRECTION_OFFSET, math.pi)
+        + _DIRECTION_OFFSET
+        + direction_class.to(raw_yaw.dtype) * math.pi
+    )
+    return torch.remainder(yaw + math.pi, 2.0 * math.pi) - math.pi
+
+
 def axis_aligned_nms(boxes, scores, threshold):
     if boxes.numel() == 0:
         return torch.empty(0, dtype=torch.long, device=boxes.device)
@@ -195,7 +208,7 @@ class FCOS3DPostProcessor:
                 "cop_valid_by_level": [],
                 "cop_final_by_level": [],
             }
-            raws, local_depths, depth_confidences = [], [], []
+            raws, direction_logits, local_depths, depth_confidences = [], [], [], []
             centers, scores, rank_scores, labels = [], [], [], []
             class_probabilities, geo_weights = [], []
             source_levels, level_candidate_counts = [], []
@@ -212,6 +225,11 @@ class FCOS3DPostProcessor:
                     prediction["bbox"][image_index]
                     .permute(1, 2, 0)
                     .reshape(-1, bbox_channels)
+                )
+                all_direction_logits = (
+                    prediction["direction"][image_index]
+                    .permute(1, 2, 0)
+                    .reshape(-1, prediction["direction"].shape[1])
                 )
                 depth_logits = prediction.get("depth_logits")
                 all_probability = None
@@ -258,6 +276,7 @@ class FCOS3DPostProcessor:
                         "chain": int(chain_selected.sum().item()),
                     })
                 raw = all_raw[locations]
+                direction_logit = all_direction_logits[locations]
                 local_depth = all_depth[locations]
                 depth_confidence = all_depth_confidence[locations]
                 points = feature_points(height, width, stride, raw.device)[locations]
@@ -267,6 +286,7 @@ class FCOS3DPostProcessor:
                 if prediction.get("geo_weight") is not None:
                     geo_weight = prediction["geo_weight"][image_index].reshape(-1)[locations]
                 raws.append(raw)
+                direction_logits.append(direction_logit)
                 local_depths.append(local_depth)
                 depth_confidences.append(depth_confidence)
                 centers.append(centers2d)
@@ -288,6 +308,7 @@ class FCOS3DPostProcessor:
                 ))
                 continue
             raw = torch.cat(raws)
+            direction_logits = torch.cat(direction_logits)
             local_depth = torch.cat(local_depths)
             depth_confidence = torch.cat(depth_confidences)
             centers2d = torch.cat(centers)
@@ -312,6 +333,7 @@ class FCOS3DPostProcessor:
             max_dimension_log = math.log(self.max_dimension)
             valid = (
                 torch.isfinite(raw).all(dim=1)
+                & torch.isfinite(direction_logits).all(dim=1)
                 & torch.isfinite(local_depth)
                 & torch.isfinite(depth_confidence)
                 & torch.isfinite(centers2d).all(dim=1)
@@ -334,6 +356,7 @@ class FCOS3DPostProcessor:
             selected_values = self._take(
                 {
                     "raw": raw,
+                    "direction_logits": direction_logits,
                     "local_depth": local_depth,
                     "depth_confidence": depth_confidence,
                     "centers2d": centers2d,
@@ -350,6 +373,7 @@ class FCOS3DPostProcessor:
                 selected,
             )
             raw = selected_values["raw"]
+            direction_logits = selected_values["direction_logits"]
             local_depth = selected_values["local_depth"]
             depth_confidence = selected_values["depth_confidence"]
             centers2d = selected_values["centers2d"]
@@ -394,7 +418,9 @@ class FCOS3DPostProcessor:
             )
             normalized_x, normalized_y = undistort_points(centers2d, k, coefficients)
             x = normalized_x * z; y = normalized_y * z
-            dims = raw[:, 3:6].exp(); yaw = raw[:, 6]
+            dims = raw[:, 3:6].exp()
+            direction_class = direction_logits.argmax(dim=1)
+            yaw = _decode_global_yaw(raw[:, 6], direction_class)
             velocity = raw.new_zeros((raw.shape[0], 2))
             boxes3d = torch.cat(
                 [
