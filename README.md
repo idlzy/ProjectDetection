@@ -24,6 +24,30 @@ python3 -m pip install -e '.[dev]'
 
 ## 使用
 
+评估可通过 `evaluation.class_range` 设置各类别的最大评估距离（米）：
+
+```yaml
+evaluation:
+  class_range:
+    car: 50
+    Pedestrian: 40
+```
+
+类别名需与 `data.classes` 完全一致；`null` / `{}` 不启用过滤，未列出的类别
+不限制距离。GT 和预测框都会在指标匹配前过滤，主评估、各 FPN 检测头评估、
+COP 分支评估及其混淆矩阵、置信度分布使用同一范围。距离为目标中心经
+`camera_to_vehicle_rotation`、`camera_to_vehicle_translation` 转换后到车体原点
+的 XY 平面距离，包含相机平移；不是相机 z 深度。
+与 [nuScenes 距离过滤](https://github.com/nutonomy/nuscenes-devkit/blob/master/python-sdk/nuscenes/eval/common/loaders.py)
+一致，仅保留距离严格小于上限的目标，边界上的目标也排除。启用过滤但缺少有效外参时会报错。
+结果 JSON 会记录 `class_range` 和距离口径；该设置不改变训练样本、推理或可视化输出。
+
+仅本次评估临时启用也可通过支持 `--set` 的评估入口传入：
+
+```bash
+--set 'evaluation.class_range={car: 50, Pedestrian: 40}'
+```
+
 本地 `/home/gy-zb-a-luziyang/datasets/mw3d` 数据首次使用时，先按完整时序组生成
 训练、验证和测试清单。默认比例为 8:1:1，固定随机种子为 3407：
 

@@ -203,6 +203,17 @@ def validate_config(config: Dict[str, Any]) -> None:
     if config["evaluation"].get("mean_ap_weight", 5) <= 0:
         raise ValueError("evaluation.mean_ap_weight must be greater than 0")
     evaluated_classes = config["evaluation"].get("classes")
+    class_range = config["evaluation"].get("class_range")
+    if class_range is not None:
+        if not isinstance(class_range, dict):
+            raise ValueError("evaluation.class_range must be null or a class-to-distance mapping")
+        unknown = set(class_range) - set(config["data"]["classes"])
+        if unknown:
+            raise ValueError("Unknown evaluation.class_range classes: %s" % ", ".join(map(str, unknown)))
+        for name, distance in class_range.items():
+            if (isinstance(distance, bool) or not isinstance(distance, (int, float))
+                    or not math.isfinite(distance) or distance <= 0):
+                raise ValueError("evaluation.class_range.%s must be a finite positive distance in meters" % name)
     if evaluated_classes is not None:
         if not isinstance(evaluated_classes, list) or not evaluated_classes:
             raise ValueError("evaluation.classes must be null or a non-empty list")

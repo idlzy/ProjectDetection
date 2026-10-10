@@ -81,6 +81,7 @@ class Mw3dMetric:
         depth_bins=DEFAULT_DEPTH_BINS,
         evaluated_classes=None,
         tp_threshold=None,
+        class_range=None,
     ):
         # ``tp_threshold`` remains accepted for callers using the old API.
         if tp_threshold is not None:
@@ -98,6 +99,20 @@ class Mw3dMetric:
                 "Unknown evaluated classes: %s" % ", ".join(sorted(unknown_classes))
             )
         self.class_ids = [self.all_class_names.index(name) for name in self.class_names]
+        if class_range is not None and not isinstance(class_range, dict):
+            raise ValueError("class_range must be null or a class-to-distance mapping")
+        self.class_range = dict(class_range or {})
+        unknown = set(self.class_range) - set(self.all_class_names)
+        if unknown:
+            raise ValueError("Unknown class_range classes: %s" % ", ".join(map(str, unknown)))
+        for name, distance in self.class_range.items():
+            if (isinstance(distance, bool) or not isinstance(distance, (int, float))
+                    or not math.isfinite(distance) or distance <= 0):
+                raise ValueError("class_range.%s must be a finite positive distance in meters" % name)
+        self._range_by_id = {
+            self.all_class_names.index(name): float(distance)
+            for name, distance in self.class_range.items()
+        }
         self.distance_thresholds = [float(value) for value in distance_thresholds]
         self.tp_distance_threshold = float(tp_distance_threshold)
         self.tp_threshold = self.tp_distance_threshold
@@ -109,15 +124,37 @@ class Mw3dMetric:
 
     def update(self, predictions, targets):
         for prediction, target in zip(predictions, targets):
-            self.samples.append(
-                (
-                    _to_owned_numpy(prediction["boxes3d"]),
-                    _to_owned_numpy(prediction["scores"]),
-                    _to_owned_numpy(prediction["labels"]),
-                    _to_owned_numpy(target["boxes3d"]),
-                    _to_owned_numpy(target["labels"]),
-                )
-            )
+            boxes = _to_owned_numpy(prediction["boxes3d"])
+            scores = _to_owned_numpy(prediction["scores"])
+            labels = _to_owned_numpy(prediction["labels"])
+            gt_boxes = _to_owned_numpy(target["boxes3d"])
+            gt_labels = _to_owned_numpy(target["labels"])
+            if self._range_by_id:
+                required = ("camera_to_vehicle_rotation", "camera_to_vehicle_translation")
+                if any(key not in target for key in required):
+                    raise ValueError("class_range requires camera-to-vehicle rotation and translation in target")
+                rotation = _to_owned_numpy(target[required[0]]).astype(np.float64)
+                translation = _to_owned_numpy(target[required[1]]).astype(np.float64)
+                if (rotation.shape != (3, 3) or translation.shape != (3,)
+                        or not np.isfinite(rotation).all() or not np.isfinite(translation).all()):
+                    raise ValueError("class_range requires finite rotation (3,3) and translation (3,)")
+                keep = self._range_mask(boxes, labels, rotation, translation)
+                gt_keep = self._range_mask(gt_boxes, gt_labels, rotation, translation)
+                boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
+                gt_boxes, gt_labels = gt_boxes[gt_keep], gt_labels[gt_keep]
+            # Store filtered copies so AP, confusion, confidence histograms,
+            # head/COP metrics and distributed state all use the same scope.
+            self.samples.append((boxes, scores, labels, gt_boxes, gt_labels))
+
+    def _range_mask(self, boxes, labels, rotation, translation):
+        centers_vehicle = boxes[:, :3].astype(np.float64) @ rotation.T + translation
+        distances = np.linalg.norm(centers_vehicle[:, :2], axis=1)
+        keep = np.ones(len(boxes), dtype=bool)
+        for class_id, maximum in self._range_by_id.items():
+            selected = labels == class_id
+            # Same strict cutoff as nuScenes: a center at the maximum is excluded.
+            keep[selected] = distances[selected] < maximum
+        return keep
 
     def state_dict(self):
         return self.samples
@@ -443,6 +480,9 @@ class Mw3dMetric:
             "mean_ap_weight": self.mean_ap_weight,
             "tp_distance_threshold": self.tp_distance_threshold,
             "evaluated_classes": list(self.class_names),
+            "class_range": dict(self.class_range) or None,
+            "range_distance": "vehicle_xy" if self.class_range else None,
+            "range_comparison": "strict_less_than" if self.class_range else None,
             "NDS": nds,
             "mAP": mean_ap,
             "mATE": tp_errors["mATE"],

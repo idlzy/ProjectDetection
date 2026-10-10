@@ -339,6 +339,7 @@ def _build_metric(config):
         mean_ap_weight=evaluation.get("mean_ap_weight", 5.0),
         depth_bins=evaluation.get("depth_bins"),
         evaluated_classes=evaluation.get("classes"),
+        class_range=evaluation.get("class_range"),
     )
 
 
