@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render reproducible ONNX predictions sampled from every test ann_batch."""
+"""Render reproducible ONNX/PyTorch predictions from every test ann_batch."""
 
 from __future__ import annotations
 
@@ -27,23 +27,95 @@ from project_detection.models import build_model, forward_with_targets
 from project_detection.task import FCOS3DPostProcessor
 from project_detection.visualization import draw_camera_view
 if __package__:
+    from tools.infer import prepare_image as _prepare_pytorch_image
+    from tools.onnx_contract import output_fields, output_names as contract_output_names
     from tools.infer_onnx import (
-        _synchronize,
-        load_postprocess_model,
-        prepare_sample,
-        reconstruct_outputs,
         select_providers,
         validate_input,
     )
 else:
+    from infer import prepare_image as _prepare_pytorch_image
+    from onnx_contract import output_fields, output_names as contract_output_names
     from infer_onnx import (
-        _synchronize,
-        load_postprocess_model,
-        prepare_sample,
-        reconstruct_outputs,
         select_providers,
         validate_input,
     )
+
+
+def _synchronize(device):
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def prepare_sample(image_path, calibration_path, config, extrinsic_path=None):
+    """Use the PTH inference calibration contract and batched ORT input."""
+    image, tensor, target = _prepare_pytorch_image(
+        image_path, calibration_path, config, extrinsic_path=extrinsic_path,
+    )
+    return image, np.ascontiguousarray(tensor.unsqueeze(0).numpy()), target
+
+
+def reconstruct_outputs(names, values, config, device):
+    """Adapt ORT arrays to the repository's Torch postprocessor contract."""
+    expected = contract_output_names(config)
+    if len(names) != len(expected) or set(names) != set(expected) or len(values) != len(names):
+        raise ValueError("ONNX output names do not match the configured raw-head contract")
+    named = {}
+    for name, value in zip(names, values):
+        array = np.asarray(value)
+        if not np.isfinite(array).all():
+            raise FloatingPointError("Non-finite ONNX output: %s" % name)
+        named[name] = torch.from_numpy(array).to(device)
+    levels = []
+    for level in range(3, 8):
+        maps = {field: named["p%d_%s" % (level, field)] for field in output_fields(config)}
+        maps.setdefault("depth_logits", None)
+        maps.setdefault("geo_weight", None)
+        levels.append(maps)
+    return levels
+
+
+def load_postprocess_model(config, model_path, checkpoint, device, session):
+    """Restore learned host decoding state from a checkpoint or ONNX metadata."""
+    if checkpoint:
+        model = build_model(config).to(device)
+        load_checkpoint(checkpoint, model, strict=True)
+        model.eval()
+        return model, str(Path(checkpoint).resolve())
+    embedded = session.get_modelmeta().custom_metadata_map.get("project_detection_inference")
+    sidecar = Path(model_path).with_suffix(".meta.json")
+    if embedded:
+        metadata = json.loads(embedded)
+        source = "onnx_metadata"
+    elif sidecar.is_file():
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        source = str(sidecar.resolve())
+    else:
+        raise ValueError("ONNX decoding metadata is missing; provide --checkpoint or re-export the model")
+    if metadata.get("format") != "project_detection_raw_head_v1":
+        raise ValueError("Unsupported ONNX metadata format; provide --checkpoint")
+    for key in ("probabilistic_depth", "geometric_depth", "attribute_prediction_mode"):
+        default = "parallel" if key == "attribute_prediction_mode" else False
+        if metadata.get(key, default) != config["model"].get(key, default):
+            raise ValueError("ONNX metadata and config disagree on %s" % key)
+    embedded_config = metadata.get("inference_config", {})
+    for key in ("strides", "depth_mode", "depth_bin_unit", "depth_bin_max"):
+        exported = embedded_config.get("model", {}).get(key)
+        if exported is not None and exported != config["model"].get(key):
+            raise ValueError("ONNX metadata and config disagree on %s" % key)
+    classes = embedded_config.get("data", {}).get("classes")
+    if classes is not None and classes != config["data"]["classes"]:
+        raise ValueError("ONNX metadata and config disagree on class order")
+    logit = metadata.get("depth_fuse_logit")
+    if config["model"].get("probabilistic_depth"):
+        if logit is None or not math.isfinite(float(logit)):
+            raise ValueError("ONNX metadata lacks a finite learned depth_fuse_logit; provide --checkpoint")
+    model = build_model(config).to(device)
+    if logit is not None and model.head.depth_fuse_logit is not None:
+        with torch.no_grad():
+            model.head.depth_fuse_logit.fill_(float(logit))
+    model.eval()
+    return model, source
 
 
 CJK_FONT_CANDIDATES = (
@@ -310,7 +382,9 @@ def _configure_evaluation(config, args):
 
 
 def render_test_batches(args):
-    data_root = Path(args.data_root)
+    config = load_config(args.config, args.overrides)
+    _configure_evaluation(config, args)
+    data_root = Path(args.data_root or config["data"].get("ready_root") or config["data"]["data_root"])
     model_path = Path(args.model)
     output_path = Path(args.output)
     summary_path = Path(args.summary) if args.summary else output_path.with_suffix(
@@ -329,9 +403,6 @@ def render_test_batches(args):
             raise FileExistsError(
                 "%s already exists; pass --overwrite to replace it" % path
             )
-    config = load_config(args.config, args.overrides)
-    _configure_evaluation(config, args)
-
     device = torch.device(args.postprocess_device)
     if device.type != "cuda" or not torch.cuda.is_available():
         raise RuntimeError(
@@ -349,7 +420,7 @@ def render_test_batches(args):
         session = ort.InferenceSession(str(model_path), providers=providers)
         output_names = [item.name for item in session.get_outputs()]
         postprocess_model, state_source = load_postprocess_model(
-            config, model_path, args.checkpoint, device
+            config, model_path, args.checkpoint, device, session
         )
         processor = FCOS3DPostProcessor(postprocess_model, config)
         runtime_providers = session.get_providers()
@@ -499,7 +570,7 @@ def build_parser():
     parser.add_argument(
         "--checkpoint", help="Optional host post-process .pth for ONNX only"
     )
-    parser.add_argument("--data-root", required=True)
+    parser.add_argument("--data-root", help="Dataset root; defaults to config data.ready_root/data_root")
     parser.add_argument(
         "--output",
         default="outputs/test_ann_batch_predictions.png",
