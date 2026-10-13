@@ -390,6 +390,7 @@ def draw_bev(
     max_detections,
     size=(700, 700),
     draw_ground_truth=True,
+    show_labels=True,
 ):
     height, width = size
     canvas = np.full((height, width, 3), 245, dtype=np.uint8)
@@ -454,12 +455,14 @@ def draw_bev(
             continue
         color = color_for_class(int(label))
         cv2.polylines(canvas, [points], True, color, 2)
-        bbox_regions.append((*points.min(axis=0), *(points.max(axis=0) + 1)))
-        lines = [classes[int(label)], "score=%.2f" % score]
-        if depth_confidences is not None:
-            lines[1] += "/%.2f" % float(depth_confidences[index])
-        label_panels.append((lines, tuple(points[0]), color, (255, 255, 255), bbox_regions[-1]))
-    draw_adaptive_labels(canvas, label_panels, bbox_regions)
+        if show_labels:
+            bbox_regions.append((*points.min(axis=0), *(points.max(axis=0) + 1)))
+            lines = [classes[int(label)], "score=%.2f" % score]
+            if depth_confidences is not None:
+                lines[1] += "/%.2f" % float(depth_confidences[index])
+            label_panels.append((lines, tuple(points[0]), color, (255, 255, 255), bbox_regions[-1]))
+    if show_labels:
+        draw_adaptive_labels(canvas, label_panels, bbox_regions)
     legend = "prediction=class color"
     if draw_ground_truth and len(target.get("boxes3d", [])):
         legend = "GT=black, " + legend

@@ -373,6 +373,7 @@ def main():
                     result,
                     config["data"]["classes"],
                     args.max_detections,
+                    show_labels=False,
                 )
                 if not cv2.imwrite(str(bev_path), bev):
                     raise OSError("Cannot write BEV visualization: %s" % bev_path)
