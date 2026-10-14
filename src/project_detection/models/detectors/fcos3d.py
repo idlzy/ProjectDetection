@@ -103,10 +103,15 @@ class FCOS3D(nn.Module):
                 local_geometric_constraints=local_geometric_constraints,
             )
 
-    def forward(self, images, camera_matrices=None):
+    def forward(self, images, camera_matrices=None, feature_taps=None):
         features = self.backbone(images)
         pyramid = self.neck(features)
         if not self.camera_conditioning:
+            if feature_taps:
+                outputs, selected = self.head(pyramid, feature_taps=feature_taps)
+                if "neck_pyramid" in feature_taps:
+                    selected["neck_pyramid"] = pyramid
+                return outputs, selected
             return self.head(pyramid)
         if camera_matrices is None:
             raise ValueError("camera_matrices are required when camera conditioning is enabled")
@@ -126,4 +131,9 @@ class FCOS3D(nn.Module):
             ),
             dim=1,
         )
+        if feature_taps:
+            outputs, selected = self.head(pyramid, camera_features, feature_taps)
+            if "neck_pyramid" in feature_taps:
+                selected["neck_pyramid"] = pyramid
+            return outputs, selected
         return self.head(pyramid, camera_features)

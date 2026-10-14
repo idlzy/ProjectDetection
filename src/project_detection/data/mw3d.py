@@ -142,6 +142,9 @@ class Mw3dReadyDataset(Dataset):
             calibration["t_c2v"].astype(np.float32)
         )
         target["image_size"] = torch.tensor([target_h, target_w], dtype=torch.int64)
+        target["valid_image_size"] = torch.tensor(
+            [resized_h, resized_w], dtype=torch.int64
+        )
         target["sample_token"] = record.get("sample_token", record.get("stem", str(index)))
         target["ann_batch"] = _record_ann_batch(record) or record.get("split_group", "unknown")
         target["split_group"] = record.get("split_group", target["ann_batch"])

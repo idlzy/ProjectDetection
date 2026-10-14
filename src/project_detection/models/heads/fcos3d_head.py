@@ -298,7 +298,14 @@ class FCOS3DHead(nn.Module):
                 nn.init.zeros_(module.conv_offset_mask.bias)
         nn.init.constant_(self.conv_cls.bias, -math.log((1 - 0.01) / 0.01))
 
-    def forward(self, features, camera_features=None):
+    def forward(self, features, camera_features=None, feature_taps=None):
+        selected_features = {name: [] for name in (feature_taps or [])
+                             if name != "neck_pyramid"}
+        unknown = set(feature_taps or []) - {
+            "neck_pyramid", "head_cls_tower", "head_reg_tower"
+        }
+        if unknown:
+            raise ValueError("Unknown feature taps: %s" % sorted(unknown))
         if len(features) != self.num_levels:
             raise ValueError("FCOS3DHead expects five pyramid feature levels")
         film = None
@@ -310,6 +317,10 @@ class FCOS3DHead(nn.Module):
         for level, feature in enumerate(features):
             cls_feature = self.cls_tower(feature, level)
             reg_feature = self.reg_tower(feature, level)
+            if "head_cls_tower" in selected_features:
+                selected_features["head_cls_tower"].append(cls_feature)
+            if "head_reg_tower" in selected_features:
+                selected_features["head_reg_tower"].append(reg_feature)
             cls_branch = self.cls_branch(cls_feature, level)
 
             regression_features = [
@@ -375,7 +386,7 @@ class FCOS3DHead(nn.Module):
                 selected["chain_selected"] = choose_chain
                 active = selected
             outputs.append(dict(common, **active))
-        return outputs
+        return (outputs, selected_features) if feature_taps else outputs
 
     def decode_depth(self, direct_raw, depth_logits=None):
         direct = direct_raw.exp()

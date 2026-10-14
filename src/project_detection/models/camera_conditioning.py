@@ -3,10 +3,10 @@
 import torch
 
 
-def forward_with_targets(model, images, targets):
+def forward_with_targets(model, images, targets, feature_taps=None):
     """Run a detector with per-image intrinsics when conditioning is enabled."""
     if not getattr(model, "camera_conditioning", False):
-        return model(images)
+        return model(images, feature_taps=feature_taps) if feature_taps else model(images)
     if len(targets) != images.shape[0]:
         raise ValueError("One camera matrix is required per image")
     try:
@@ -15,4 +15,5 @@ def forward_with_targets(model, images, targets):
         ).to(device=images.device, dtype=images.dtype)
     except KeyError as error:
         raise ValueError("camera_matrix is required for camera conditioning") from error
-    return model(images, camera_matrices)
+    return (model(images, camera_matrices, feature_taps=feature_taps)
+            if feature_taps else model(images, camera_matrices))

@@ -40,6 +40,7 @@ from .training import (
     freeze_state_for_checkpoint,
     validate_resume_freeze_policy,
 )
+from .training.distillation import build_distillation, summarize_distillation
 
 
 class NonFiniteTrainingError(RuntimeError):
@@ -56,12 +57,23 @@ class DetectionTrainingStep(torch.nn.Module):
     one accurate graph boundary without changing the detector state dict.
     """
 
-    def __init__(self, detector, criterion):
+    def __init__(self, detector, criterion, distillation=None):
         super().__init__()
         self.detector = detector
         self.criterion = criterion
+        self.distillation = distillation
 
     def forward(self, images, targets):
+        if self.distillation is not None:
+            result = forward_with_targets(self.detector, images, targets, self.distillation.taps)
+            outputs, features = result if self.distillation.taps else (result, {})
+            losses = self.criterion(outputs, targets, self.detector.head)
+            kd = self.distillation(images, targets, self.detector, outputs, features)
+            losses["loss_gt"] = losses["loss_total"]
+            losses.update(kd)
+            losses["loss_kd_total"] = sum(kd.values(), losses["loss_total"] * 0)
+            losses["loss_total"] = losses["loss_gt"] + losses["loss_kd_total"]
+            return losses
         outputs = forward_with_targets(self.detector, images, targets)
         return self.criterion(outputs, targets, self.detector.head)
 
@@ -710,6 +722,8 @@ def save_checkpoint(
             "random_state": local_random_state,
             "random_states": random_states,
             "distributed_state": distributed_state,
+            **({"distillation": raw_model.__dict__["_distillation_training"].checkpoint_state()}
+               if raw_model.__dict__.get("_distillation_training") is not None else {}),
         },
         temporary,
     )
@@ -730,6 +744,12 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None, st
     state = checkpoint.get("model", checkpoint.get("state_dict", checkpoint))
     state = {(key[7:] if key.startswith("module.") else key): value for key, value in state.items()}
     result = model.load_state_dict(state, strict=strict)
+    if optimizer is not None:
+        distillation = model.__dict__.get("_distillation_training")
+        if distillation is not None:
+            distillation.restore(checkpoint.get("distillation"))
+        elif checkpoint.get("distillation") is not None:
+            raise ValueError("Resume of distillation checkpoint requires distillation enabled")
     if checkpoint_validator is not None:
         checkpoint_validator(checkpoint)
     if optimizer is not None and "optimizer" in checkpoint: optimizer.load_state_dict(checkpoint["optimizer"])
@@ -874,11 +894,19 @@ def train(config):
         logger.info("Model parameters | total=%d | trainable=%d", total_parameters, trainable_parameters)
         logger.info("Model architecture:\n%s", model)
     if world_size > 1 and config["train"]["sync_batch_norm"]: model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    distillation = build_distillation(config, device, logger if rank == 0 else None)
+    # Non-registered reference for train-only checkpoint state. Registration
+    # belongs to DetectionTrainingStep, not the exported student detector.
+    if distillation is not None:
+        model.__dict__["_distillation_training"] = distillation
     optimizer = torch.optim.AdamW(
         build_optimizer_parameters(model, config),
         lr=config["train"]["learning_rate"],
         weight_decay=config["train"]["weight_decay"],
     )
+    if distillation is not None and any(True for _ in distillation.parameters()):
+        optimizer.add_param_group({"name": "distillation_adapters",
+                                   "params": list(distillation.parameters())})
     scaler = torch.cuda.amp.GradScaler(
         enabled=config["train"]["amp"] and device.type == "cuda",
         init_scale=float(config["train"].get("amp_initial_scale", 2048.0)),
@@ -996,7 +1024,7 @@ def train(config):
         config["train"].get("uncertainty_loss_weight", 0.1),
         config["model"].get("local_geometric_constraints", False),
     )
-    training_step = DetectionTrainingStep(model, criterion)
+    training_step = DetectionTrainingStep(model, criterion, distillation)
     if world_size > 1:
         training_step = DistributedDataParallel(
             training_step,
@@ -1041,6 +1069,7 @@ def train(config):
     try:
         for epoch in range(start_epoch, config["train"]["epochs"]):
             epoch_started = time.time()
+            distillation_epoch_stats = {}
             training_step.train()
             freeze_state = apply_freeze_schedule(model, config, epoch)
             if freeze_state["frozen"] != last_backbone_frozen:
@@ -1061,6 +1090,8 @@ def train(config):
                 if epoch == start_epoch and step < resume_step:
                     continue
                 step_started = time.time()
+                if distillation is not None:
+                    distillation.progress = epoch + step / max(len(train_loader), 1)
                 images = images.to(device, non_blocking=True); optimizer.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
                     losses = training_step(images, targets)
@@ -1081,9 +1112,15 @@ def train(config):
                     for name, parameter in model.named_parameters()
                     if parameter.grad is not None
                 ]
+                if distillation is not None:
+                    named_gradients.extend(
+                        ("distillation." + name, parameter.grad)
+                        for name, parameter in distillation.named_parameters()
+                        if parameter.grad is not None
+                    )
                 try:
                     gradient_norm = torch.nn.utils.clip_grad_norm_(
-                        model.parameters(),
+                        list(model.parameters()) + (list(distillation.parameters()) if distillation is not None else []),
                         config["train"]["gradient_clip_norm"],
                         error_if_nonfinite=nonfinite_guard,
                     )
@@ -1135,6 +1172,9 @@ def train(config):
                 scaler.step(optimizer); scaler.update()
                 if nonfinite_guard and current_global_step % parameter_check_every == 0:
                     named_parameters = list(model.named_parameters())
+                    if distillation is not None:
+                        named_parameters.extend(("distillation." + name, parameter)
+                                                for name, parameter in distillation.named_parameters())
                     local_finite = _named_tensors_are_finite(named_parameters)
                     if not _all_ranks_finite(local_finite, device):
                         _trip_nonfinite_guard(
@@ -1167,6 +1207,26 @@ def train(config):
                 )
                 if should_log:
                     logged_losses = distributed_utils.mean_tensor_dict(losses)
+                if distillation is not None:
+                    for key, value in distillation.last_stats.items():
+                        if not key.endswith("_ramp"):
+                            if key not in distillation_epoch_stats:
+                                distillation_epoch_stats[key] = value.detach().clone()
+                            else:
+                                distillation_epoch_stats[key] += value.detach()
+                    if should_log:
+                        kd_stats = distributed_utils.mean_tensor_dict(distillation.last_stats)
+                        # Convert rank-mean additive statistics back to sums.
+                        kd_stats = {key: value if key.endswith("_ramp") else value * world_size
+                                    for key, value in kd_stats.items()}
+                        if rank == 0:
+                            summary = summarize_distillation(kd_stats)
+                            summary.update({key: float(value) for key, value in kd_stats.items() if key.endswith("_ramp")})
+                            summary.update({"epoch": epoch + 1, "step": step + 1,
+                                            "global_step": current_global_step, "kind": "step"})
+                            logger.info("Distill | %s", json.dumps(summary, ensure_ascii=False))
+                            with (output_dir / "distillation.jsonl").open("a", encoding="utf-8") as handle:
+                                handle.write(json.dumps(summary, ensure_ascii=False) + "\n")
                 if rank == 0 and should_log:
                     loss_text = " ".join(
                         "%s=%.5f" % (key, value.item())
@@ -1205,6 +1265,9 @@ def train(config):
                     )
             if nonfinite_guard:
                 named_parameters = list(model.named_parameters())
+                if distillation is not None:
+                    named_parameters.extend(("distillation." + name, parameter)
+                                            for name, parameter in distillation.named_parameters())
                 local_finite = _named_tensors_are_finite(named_parameters)
                 if not _all_ranks_finite(local_finite, device):
                     _trip_nonfinite_guard(
@@ -1213,10 +1276,20 @@ def train(config):
                         scaler, losses, _nonfinite_tensor_details(named_parameters),
                         not local_finite,
                     )
+            if distillation is not None and distillation_epoch_stats:
+                epoch_stats = distributed_utils.mean_tensor_dict(distillation_epoch_stats)
+                if rank == 0:
+                    summary = summarize_distillation({key: value * world_size for key, value in epoch_stats.items()})
+                    summary.update({"epoch": epoch + 1, "kind": "epoch", "partial_epoch": bool(epoch == start_epoch and resume_step)})
+                    logger.info("Epoch distillation summary | %s", json.dumps(summary))
+                    with (output_dir / "distillation.jsonl").open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(summary) + "\n")
             should_validate = (epoch + 1) % config["train"]["validate_every"] == 0 or epoch + 1 == config["train"]["epochs"]
             if should_validate:
                 validation_started = time.time()
                 if rank == 0: logger.info("Validation started | epoch=%d", epoch + 1)
+                if rank == 0 and distillation is not None:
+                    logger.info("Distillation validation | student_only=true")
                 metrics = evaluate(model, val_loader, config, device, logger=logger)
                 is_new_best = False
                 if rank == 0:

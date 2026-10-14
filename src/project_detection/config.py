@@ -46,6 +46,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     missing = [key for key in required if key not in config]
     if missing:
         raise ValueError("Missing config sections: %s" % ", ".join(missing))
+    if "distillation" in config["train"]:
+        from .training.distillation import validate_distillation_config
+        validate_distillation_config(config)
     if len(config["data"]["classes"]) < 1:
         raise ValueError("data.classes must not be empty")
     ann_batches = config["data"].get("ann_batches")
