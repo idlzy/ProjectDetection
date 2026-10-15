@@ -11,6 +11,7 @@ from torch import nn
 from ..data.preprocessing import normalize_image
 from ..models import build_model, forward_with_targets
 from ..task.distillation import DistillationCriterion
+from ..task.distillation.output import DEPTH_OUTPUTS, OUTPUT_NAMES, output_enabled
 
 
 def validate_distillation_config(config):
@@ -54,23 +55,36 @@ def validate_distillation_config(config):
             continue
         active = True
         if name == "output":
-            if not config["model"].get("probabilistic_depth", False):
+            allowed_output = set(OUTPUT_NAMES) | {"enabled", "branch_mode", "warmup_epochs", "quality"}
+            if set(component) - allowed_output:
+                raise ValueError("Unknown output distillation keys: %s" % sorted(set(component) - allowed_output))
+            if any(output_enabled(component, key) for key in DEPTH_OUTPUTS) and not config["model"].get("probabilistic_depth", False):
                 raise ValueError("Depth distillation requires probabilistic_depth=true")
             if component.get("branch_mode", "corresponding") != "corresponding":
                 raise ValueError("Only corresponding output branches are supported")
             selected = False
-            for key in ("depth_distribution", "depth_regression"):
+            for key in OUTPUT_NAMES:
                 item = component.get(key, {})
-                boolean(item, "enabled", True)
-                selected |= item.get("enabled", True)
+                if not isinstance(item, dict):
+                    raise ValueError("distillation.output.%s must be a mapping" % key)
+                boolean(item, "enabled", key in DEPTH_OUTPUTS)
+                selected |= output_enabled(component, key)
+                allowed_item = {"enabled", "weight", "temperature"} if key in (
+                    "classification", "attribute", "centerness", "direction", "geometric_weight", "depth_distribution"
+                ) else {"enabled", "weight", "loss", "beta"}
+                if set(item) - allowed_item:
+                    raise ValueError("Unknown %s options: %s" % (key, sorted(set(item) - allowed_item)))
                 number(item.get("weight", 0.1), key + ".weight")
+                number(item.get("temperature", 1.0), key + ".temperature", True)
+                number(item.get("beta", 1.0 / 9.0), key + ".beta", True)
+                if item.get("loss", "smooth_l1") != "smooth_l1":
+                    raise ValueError("Only smooth_l1 regression distillation is supported")
+            for key, required in (("bbox2d", "local_geometric_constraints"),
+                                  ("geometric_weight", "geometric_depth")):
+                if output_enabled(component, key) and not config["model"].get(required, False):
+                    raise ValueError("%s distillation requires %s=true" % (key, required))
             if not selected:
                 raise ValueError("Enable at least one output loss")
-            number(component.get("depth_distribution", {}).get("temperature", 1.0), "temperature", True)
-            regression = component.get("depth_regression", {})
-            number(regression.get("beta", 1.0), "beta", True)
-            if regression.get("loss", "smooth_l1") != "smooth_l1":
-                raise ValueError("Only smooth_l1 depth distillation is supported")
             quality = component.get("quality", {})
             boolean(quality, "enabled", True)
             if quality.get("mode", "gt_depth_relative_error") != "gt_depth_relative_error":
@@ -174,6 +188,12 @@ def build_distillation(config, device, logger=None):
         for key in keys:
             if teacher_config[section].get(key) != config[section].get(key):
                 raise ValueError("Teacher/student mismatch: %s.%s" % (section, key))
+    output = options.get("output", {})
+    if output.get("enabled", False):
+        for name, key in (("attribute", "num_attrs"), ("bbox2d", "local_geometric_constraints"),
+                          ("geometric_weight", "geometric_depth")):
+            if output_enabled(output, name) and teacher_config["model"].get(key) != config["model"].get(key):
+                raise ValueError("Teacher/student mismatch for %s: model.%s" % (name, key))
     if len(config["model"]["strides"]) != 5:
         raise ValueError("Distillation requires five feature levels")
     if teacher_config["model"]["backbone"].startswith("legacy_hat"):
@@ -210,7 +230,11 @@ def summarize_distillation(stats):
     summary["output_valid_points"] = quality_count
     for key, value in values.items():
         if key.endswith("_raw_sum") or key.endswith("_weighted_sum"):
-            summary[key[:-4]] = value / count if count else None
+            suffix = "_raw_sum" if key.endswith("_raw_sum") else "_weighted_sum"
+            denominator = values.get(key[:-len(suffix)] + "_count", count)
+            summary[key[:-4]] = value / denominator if denominator else None
+        elif key.startswith("loss_kd_output_") and key.endswith("_count"):
+            summary[key] = value
     for name, key in {"teacher_quality_mean": "quality_sum", "teacher_depth_mae": "teacher_error_sum",
                       "student_depth_mae": "student_error_sum", "teacher_better_fraction": "teacher_better_sum"}.items():
         summary[name] = values.get(key, 0) / quality_count if quality_count else None

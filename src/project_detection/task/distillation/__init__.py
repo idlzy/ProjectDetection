@@ -5,7 +5,7 @@ import torch.distributed as distributed
 from torch import nn
 
 from .feature import FeatureDistillation
-from .output import depth_output_losses
+from .output import output_losses
 from .regions import distillation_regions
 
 
@@ -23,7 +23,7 @@ class DistillationCriterion(nn.Module):
         ):
             raise ValueError("Teacher/student output grids differ; use matching pyramid sizes")
         regions = distillation_regions(student, regions_targets, self.config)
-        zero = student[0]["cls"].float().sum() * 0
+        zero = torch.nan_to_num(student[0]["cls"].float(), nan=0., posinf=0., neginf=0.).sum() * 0
         count = sum((entry[0].sum() for level in regions for entry in level), zero.detach().clone())
         normalizer = count.detach().clone()
         if distributed.is_available() and distributed.is_initialized():
@@ -40,7 +40,7 @@ class DistillationCriterion(nn.Module):
             if not options.get("enabled", False):
                 continue
             if component == "output":
-                raw, quality = depth_output_losses(student, teacher, regions, student_head, teacher_head, options)
+                raw, quality = output_losses(student, teacher, regions, student_head, teacher_head, options)
                 stats.update(quality)
                 weights = {key: options.get(key, {}).get("weight", 0.1) for key in raw}
             else:
@@ -48,7 +48,17 @@ class DistillationCriterion(nn.Module):
                 weights = {tap["name"]: tap.get("weight", 0.05) for tap in options["taps"]}
             for key, value in raw.items():
                 name = "loss_kd_%s_%s" % (component, key)
-                losses[name] = value / normalizer * weights[key] * ramp
+                denominator = normalizer
+                if component == "output":
+                    denominator = stats[name + "_count"].detach().clone()
+                    if distributed.is_available() and distributed.is_initialized():
+                        distributed.all_reduce(denominator)
+                        denominator /= distributed.get_world_size()
+                    # Branch averaging and global_count/world_size may be < 1.
+                    # Preserve positive fractional counts; guard only empty regions.
+                    denominator = torch.where(denominator > 0, denominator,
+                                              torch.ones_like(denominator))
+                losses[name] = value / denominator * weights[key] * ramp
                 stats[name + "_raw_sum"] = value.detach()
                 stats[name + "_weighted_sum"] = value.detach() * weights[key] * ramp
         return losses, stats
