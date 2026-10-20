@@ -24,6 +24,12 @@ python3 -m pip install -e '.[dev]'
 
 ## 使用
 
+`scripts/start_train.sh` 默认自动登记“服务器重启后续训”，训练命令不变，无需逐实验
+安装服务；服务器只需一次性开启用户 lingering。手动停训和正常完成不会复活。
+系统未准备好时会明确报错且不启动训练；可显式用 `TRAIN_BOOT_RESUME=0` 关闭。
+一次性准备、状态查询及维护窗口验收见
+[训练开机自动恢复](docs/training_boot_resume.md)。
+
 评估可通过 `evaluation.class_range` 设置各类别的最大评估距离（米）：
 
 ```yaml

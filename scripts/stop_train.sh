@@ -23,12 +23,23 @@ if [[ -z "${python_bin}" ]]; then
     echo "No Python interpreter found. Activate the environment or set TRAIN_PYTHON." >&2
     exit 1
 fi
+# Persist user intent before signalling. This also disarms an offline job;
+# lookup may subsequently report it is no longer running, which is harmless.
+disarm_command=("${python_bin}" "${RUNTIME_TOOL}" disarm --runtime-root "${RUNTIME_DIR}")
+if [[ -n "${selector}" ]]; then
+    disarm_command+=("${selector}")
+fi
+"${disarm_command[@]}"
 lookup_command=("${python_bin}" "${RUNTIME_TOOL}" lookup --runtime-root "${RUNTIME_DIR}")
 if [[ -n "${selector}" ]]; then
     lookup_command+=("${selector}")
 fi
 
 if ! lookup_output="$("${lookup_command[@]}")"; then
+    if [[ -n "${selector}" ]]; then
+        echo "Boot recovery disabled; no running process to stop: ${selector}"
+        exit 0
+    fi
     exit 1
 fi
 mapfile -t job_fields <<< "${lookup_output}"

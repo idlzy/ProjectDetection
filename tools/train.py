@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import fcntl
 import logging
 import os
 from pathlib import Path
@@ -26,20 +27,12 @@ def main():
     overrides = [item for group in args.override_groups for item in group]
     config = load_config(args.config, overrides)
     if args.auto_resume:
-        checkpoint_dir = (
-            Path(config["experiment"]["output_dir"])
-            / config["experiment"]["name"]
-            / "checkpoints"
-        )
-        candidates = [
-            path for path in (
-                checkpoint_dir / "recovery.pth",
-                checkpoint_dir / "last.pth",
-            ) if path.is_file()
-        ]
-        if candidates:
-            config["train"]["resume"] = str(max(candidates, key=lambda path: path.stat().st_mtime))
-            config["train"]["pretrain"] = None
+        try:
+            from tools.train_checkpoint import select_checkpoint
+        except ModuleNotFoundError:
+            from train_checkpoint import select_checkpoint
+        config["train"]["resume"] = select_checkpoint(config, world_size)
+        config["train"]["pretrain"] = None
     validate_config(config)
     if args.validate_only:
         pretrain = config["train"].get("pretrain")
@@ -57,11 +50,23 @@ def main():
                 raise FileNotFoundError("Missing split manifest: %s" % manifest)
         print("Training configuration and checkpoint paths are valid")
         return
+    lock = None
     try:
+        if rank == 0:
+            output = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"]
+            output.mkdir(parents=True, exist_ok=True)
+            lock = (output / ".training.lock").open("a+")
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError("Experiment output is already locked by another training process")
         train(config)
     except BaseException:
         logging.getLogger(LOGGER_NAME).exception("Training terminated with an error")
         raise
+    finally:
+        if lock is not None:
+            lock.close()
 
 
 if __name__ == "__main__": main()

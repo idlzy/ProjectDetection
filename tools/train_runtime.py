@@ -20,6 +20,10 @@ ACTIVE_STATES = {
 }
 
 
+def boot_id():
+    return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+
+
 def utc_timestamp():
     return dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
 
@@ -44,14 +48,22 @@ def process_matches(pid, expected_start_ticks=None):
     return expected_start_ticks is None or str(current) == str(expected_start_ticks)
 
 
-def atomic_json(path, value):
+def atomic_json(path, value, durable=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    with temporary.open("w", encoding="utf-8") as handle:
+        handle.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+        if durable:
+            handle.flush()
+            os.fsync(handle.fileno())
     os.replace(str(temporary), str(path))
+    if durable:
+        directory_fd = os.open(str(path.parent), os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
 
 @contextmanager
@@ -147,6 +159,8 @@ def load_metadata(path):
 def metadata_is_active(metadata):
     if not metadata or metadata.get("state") not in ACTIVE_STATES:
         return False
+    if metadata.get("boot_id") not in (None, boot_id()):
+        return False
     pid = metadata.get("supervisor_pid")
     if pid and process_matches(pid, metadata.get("supervisor_start_ticks")):
         return True
@@ -226,7 +240,7 @@ def ensure_no_conflict(jobs, experiment, output_dir, gpu_resources):
 
 
 def reserve_job(runtime_root, train_arguments, visible_devices=None):
-    _, experiment, output_dir = parse_train_arguments(train_arguments)
+    config, experiment, output_dir = parse_train_arguments(train_arguments)
     gpu_tokens = visible_gpu_tokens(visible_devices)
     resources = canonical_gpu_resources(gpu_tokens)
     runtime_root = Path(runtime_root).resolve()
@@ -243,8 +257,17 @@ def reserve_job(runtime_root, train_arguments, visible_devices=None):
         identifier = job_identifier(experiment)
         job_dir = runtime_root / "jobs" / identifier
         job_dir.mkdir(parents=True, exist_ok=True)
+        boot_job = os.environ.get("TRAIN_BOOT_JOB_DIR")
+        if boot_job:
+            record = load_metadata(job_dir / "boot_resume.json")
+            if Path(boot_job).resolve() != job_dir or not record or not record.get("desired_running"):
+                raise RuntimeError("Boot recovery was cancelled before reservation")
+        else:
+            disarm_boot_resume(job_dir, "manual_relaunch", locked=True)
         metadata = {
             "schema_version": 1,
+            "boot_id": boot_id(),
+            "python": sys.executable,
             "job_id": identifier,
             "experiment": experiment,
             "output_dir": str(output_dir),
@@ -263,6 +286,8 @@ def reserve_job(runtime_root, train_arguments, visible_devices=None):
             "train_arguments": list(train_arguments),
         }
         atomic_json(job_dir / "metadata.json", metadata)
+        # Capture the actual resolved configuration before a future config edit.
+        atomic_json(job_dir / "launch_config.json", config, durable=True)
     return job_dir, metadata
 
 
@@ -273,10 +298,16 @@ def activate_job(job_dir, pid):
         metadata = load_metadata(job_dir / "metadata.json")
         if metadata is None:
             raise RuntimeError("job metadata is missing: %s" % job_dir)
+        if os.environ.get("TRAIN_BOOT_JOB_DIR"):
+            record = load_metadata(job_dir / "boot_resume.json")
+            if not record or not record.get("desired_running"):
+                raise RuntimeError("Boot recovery was cancelled before activation")
         start_ticks = process_start_ticks(pid)
         if start_ticks is None:
             raise RuntimeError("supervisor PID is not alive: %s" % pid)
-        pending_state = metadata.pop("pending_state", "running")
+        pending_state = metadata.pop(
+            "pending_state", "running" if metadata["state"] == "reserved" else metadata["state"]
+        )
         metadata.update(
             state=pending_state,
             updated_at=utc_timestamp(),
@@ -298,12 +329,31 @@ def update_job_state(job_dir, state):
         # The supervisor can write its first status between fork() and the
         # launcher's activate call. Preserve the reservation (and therefore
         # conflict protection) until its PID identity has been recorded.
-        if metadata.get("state") == "reserved" and not metadata.get("supervisor_pid"):
+        if (metadata.get("state") == "reserved"
+                and not metadata.get("supervisor_pid") and state != "failed"):
             metadata["pending_state"] = state
         else:
             metadata["state"] = state
         metadata["updated_at"] = utc_timestamp()
         atomic_json(job_dir / "metadata.json", metadata)
+        if state == "completed":
+            disarm_boot_resume(job_dir, "completed", locked=True)
+
+
+def disarm_boot_resume(job_dir, reason="manual_stop", locked=False):
+    job_dir = Path(job_dir)
+    def write():
+        path = job_dir / "boot_resume.json"
+        record = load_metadata(path)
+        if record is not None:
+            record.update(desired_running=False, disabled_reason=reason,
+                          updated_at=utc_timestamp())
+            atomic_json(path, record, durable=True)
+    if locked:
+        write()
+    else:
+        with registry_lock(job_dir.parent.parent):
+            write()
 
 
 def update_child_process(job_dir, pid=None):
@@ -457,6 +507,10 @@ def main():
     lookup.add_argument("--runtime-root", required=True)
     lookup.add_argument("selector", nargs="?")
 
+    disarm = subparsers.add_parser("disarm")
+    disarm.add_argument("--runtime-root", required=True)
+    disarm.add_argument("selector", nargs="?")
+
     args = parser.parse_args()
     try:
         if args.command == "reserve":
@@ -522,11 +576,21 @@ def main():
                     )
                 )
             print(format_job_table(rows))
-        elif args.command == "lookup":
+        elif args.command in ("lookup", "disarm"):
+            if args.command == "disarm" and args.selector:
+                matches = [(d, m) for d, m in iter_jobs(args.runtime_root)
+                           if d.name == args.selector or m["experiment"] == args.selector]
+                if len(matches) != 1:
+                    raise RuntimeError("expected one registered job: %s" % args.selector)
+                disarm_boot_resume(matches[0][0])
+                return
             job_dir, metadata, _ = find_active_job(
                 args.runtime_root, args.selector
             )
-            print_job_lines(job_dir, metadata)
+            if args.command == "disarm":
+                disarm_boot_resume(job_dir)
+            else:
+                print_job_lines(job_dir, metadata)
     except (RuntimeError, ValueError, OSError) as error:
         print("train-runtime: %s" % error, file=sys.stderr)
         raise SystemExit(2)

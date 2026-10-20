@@ -6,6 +6,13 @@ RUNTIME_DIR="${PROJECT_ROOT}/.runtime"
 RUNTIME_TOOL="${PROJECT_ROOT}/tools/train_runtime.py"
 mkdir -p "${RUNTIME_DIR}/jobs"
 
+# Foreground mode is required when a service owns the supervisor lifetime.
+foreground=0
+if [[ "${1:-}" == "--foreground" ]]; then
+    foreground=1
+    shift
+fi
+
 if [[ $# -eq 0 ]]; then
     set -- --config configs/experiments/fcos3d_exp_pgda.yaml
 fi
@@ -98,7 +105,17 @@ if ! python_bin="$(resolve_python)"; then
 fi
 
 echo "Using Python: ${python_bin}"
-"${python_bin}" -u tools/train.py "$@" --validate-only
+boot_resume="${TRAIN_BOOT_RESUME:-1}"
+if [[ "${boot_resume}" != "0" && "${boot_resume}" != "1" ]]; then
+    echo "TRAIN_BOOT_RESUME must be 0 or 1" >&2
+    exit 2
+fi
+# Boot-launched jobs retain their existing record and attempt budget. Only a
+# human's normal start command creates a new automatic recovery registration.
+if [[ "${boot_resume}" == "1" && -z "${TRAIN_BOOT_JOB_DIR:-}" ]]; then
+    "${python_bin}" tools/train_boot_resume.py check-service
+fi
+WORLD_SIZE="${world_size}" RANK=0 "${python_bin}" -u tools/train.py "$@" --validate-only
 
 if ! registry_output="$(
     "${python_bin}" "${RUNTIME_TOOL}" reserve \
@@ -118,6 +135,41 @@ visible_devices="${job_fields[3]}"
 output_dir="${job_fields[5]}"
 supervisor_log="${job_dir}/supervisor.log"
 
+if [[ "${boot_resume}" == "1" && -z "${TRAIN_BOOT_JOB_DIR:-}" ]]; then
+    mkdir -p "${output_dir}"
+    if ! "${python_bin}" tools/train_boot_resume.py register \
+        --job-dir "${job_dir}" --quiet; then
+        "${python_bin}" "${RUNTIME_TOOL}" state --job-dir "${job_dir}" \
+            --value failed >/dev/null 2>&1 || true
+        echo "Training was NOT started: automatic boot recovery setup failed." >&2
+        exit 1
+    fi
+elif [[ -z "${TRAIN_BOOT_JOB_DIR:-}" ]]; then
+    echo "Boot recovery DISABLED explicitly (TRAIN_BOOT_RESUME=0)."
+fi
+
+# Execute exactly the resolved snapshot recorded by reserve, not a YAML file
+# that might be edited between reservation and the child process starting.
+auto_resume=0
+for argument in "$@"; do
+    [[ "${argument}" != "--auto-resume" ]] || auto_resume=1
+done
+set -- --config "${job_dir}/launch_config.json"
+if (( auto_resume )); then
+    set -- "$@" --auto-resume
+fi
+
+if (( foreground )); then
+    if ! "${python_bin}" "${RUNTIME_TOOL}" activate --job-dir "${job_dir}" --pid "$$"; then
+        "${python_bin}" "${RUNTIME_TOOL}" disarm --runtime-root "${RUNTIME_DIR}" "${job_id}"
+        exit 1
+    fi
+    export TRAIN_JOB_DIR="${job_dir}" TRAIN_JOB_ID="${job_id}"
+    export TRAIN_EXPERIMENT="${experiment}" TRAIN_VISIBLE_DEVICES="${visible_devices}"
+    export TRAIN_WORLD_SIZE="${world_size}" TRAIN_LAUNCH_MODE="${launch_mode}"
+    exec bash "${PROJECT_ROOT}/scripts/train_supervisor.sh" "${python_bin}" "$@"
+fi
+
 TRAIN_JOB_DIR="${job_dir}" \
 TRAIN_JOB_ID="${job_id}" \
 TRAIN_EXPERIMENT="${experiment}" \
@@ -134,6 +186,7 @@ if ! "${python_bin}" "${RUNTIME_TOOL}" activate \
     kill -TERM "${train_pid}" 2>/dev/null || true
     "${python_bin}" "${RUNTIME_TOOL}" state \
         --job-dir "${job_dir}" --value failed 2>/dev/null || true
+    "${python_bin}" "${RUNTIME_TOOL}" disarm --runtime-root "${RUNTIME_DIR}" "${job_id}"
     echo "DetectionTrain failed while activating its runtime entry" >&2
     exit 1
 fi
@@ -147,6 +200,7 @@ if ! kill -0 "${train_pid}" 2>/dev/null; then
     fi
     "${python_bin}" "${RUNTIME_TOOL}" state \
         --job-dir "${job_dir}" --value failed 2>/dev/null || true
+    "${python_bin}" "${RUNTIME_TOOL}" disarm --runtime-root "${RUNTIME_DIR}" "${job_id}"
     echo "DetectionTrain failed during startup; inspect ${supervisor_log}" >&2
     tail -n 20 "${supervisor_log}" 2>/dev/null || true
     exit 1
