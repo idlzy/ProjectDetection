@@ -250,9 +250,19 @@ class FCOS3DPostProcessor:
                     enabled[list(self.evaluation_class_ids)] = True
                     combined = combined.masked_fill(~enabled[:, None, None], -1.0)
                     ranking = ranking.masked_fill(~enabled[:, None, None], -1.0)
-                flat_rank, flat_indices = ranking.flatten().topk(
-                    min(self.nms_pre, ranking.numel())
-                )
+                # Spend nms_pre on distinct locations, not location/class pairs.
+                # Keep all class hypotheses at the selected locations.
+                location_rank = ranking.reshape(cls.shape[0], -1).max(dim=0).values
+                selected_locations = location_rank.topk(
+                    min(self.nms_pre, height * width)
+                ).indices
+                flat_indices = (
+                    torch.arange(cls.shape[0], device=ranking.device)[:, None]
+                    * (height * width) + selected_locations[None, :]
+                ).reshape(-1)
+                flat_rank = ranking.flatten()[flat_indices]
+                order = flat_rank.argsort(descending=True)
+                flat_rank, flat_indices = flat_rank[order], flat_indices[order]
                 flat_scores = combined.flatten()[flat_indices]
                 keep = flat_scores >= self.score_threshold
                 flat_scores = flat_scores[keep]

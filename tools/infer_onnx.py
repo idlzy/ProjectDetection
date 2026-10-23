@@ -476,9 +476,14 @@ def postprocess(outputs, target, config, metadata):
             ranking[excluded] = -1.0
         flattened = combined.reshape(-1)
         flattened_rank = ranking.reshape(-1)
-        top_count = min(int(evaluation["nms_pre"]), len(flattened_rank))
+        # Select distinct locations by their best class, retaining all class
+        # hypotheses afterwards (same preselection as the native decoder).
+        location_rank = ranking.reshape(len(classes), -1).max(axis=0)
+        top_count = min(int(evaluation["nms_pre"]), height * width)
         if top_count:
-            top = np.argpartition(-flattened_rank, top_count - 1)[:top_count]
+            selected_locations = np.argpartition(-location_rank, top_count - 1)[:top_count]
+            top = (np.arange(len(classes))[:, None] * (height * width)
+                   + selected_locations[None, :]).reshape(-1)
             top = top[np.argsort(-flattened_rank[top], kind="stable")]
             top = top[flattened[top] >= evaluation["score_threshold"]]
         else:
