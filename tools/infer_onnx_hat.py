@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Standalone ONNX inference for the 0903 legacy HAT FCOS3D checkpoint.
+"""Standalone inference for native HAT FCOS3D ONNX exports (45/50 outputs).
 
-Requires only numpy, opencv-python and onnxruntime. The exported ONNX embeds
-its preprocessing, class, depth-fusion and postprocessing contract. This file
-does not import project_detection, PyTorch or another local script.
+Requires only numpy, opencv-python and onnxruntime. Native HAT's
+branch-major outputs are decoded on CPU. PGD exports require the trained
+sidecar .pgd.json. ProjectDetection re-exports are intentionally unsupported.
+This file does not import project_detection, PyTorch or another local script.
 """
 from __future__ import annotations
 
@@ -19,6 +20,14 @@ import numpy as np
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff"}
 FIELDS = ("cls", "bbox", "direction", "attribute", "centerness", "depth_logits")
+CLASS_NAMES_BGR = ("Animal", "Dense_object", "Obstacle", "Other_obstacles",
+                   "Pedestrian", "Special_vehicle", "Tricycle", "Uncertain",
+                   "bus", "car", "truck", "two_wheeled_vehicle")
+CLASS_NAMES_LEGACY = ("car", "truck", "bus", "Special_vehicle", "Tricycle",
+                      "two_wheeled_vehicle", "Pedestrian", "Animal", "Obstacle",
+                      "Uncertain", "Dense_object", "Other_obstacles")
+NATIVE_CHANNELS = (12, 2, 1, 3, 1, 2, 2, 9, 1)
+STRIDES = (8, 16, 32, 64, 128)
 EDGES = ((0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
          (0, 4), (1, 5), (2, 6), (3, 7))
 
@@ -160,63 +169,117 @@ def prepare_sample(image_path, calibration_path, config, extrinsic_path=None):
     return image, tensor, target
 
 
-def load_contract(session, model_path, metadata_path=None):
-    embedded = session.get_modelmeta().custom_metadata_map.get("project_detection_inference")
-    if metadata_path:
-        metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
-    elif embedded:
-        metadata = json.loads(embedded)
-    else:
-        sidecar = Path(model_path).with_suffix(".meta.json")
-        if not sidecar.is_file():
-            raise ValueError("ONNX has no embedded inference contract; provide --metadata")
-        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-    if metadata.get("format") != "project_detection_raw_head_v1":
-        raise ValueError("Unsupported ONNX export format")
-    config = metadata.get("inference_config")
-    if config is None:
-        raise ValueError("Metadata lacks inference_config; re-export the 0903 model")
-    if (config["model"].get("depth_mode") != "exp" or
-            not config["model"].get("probabilistic_depth") or
-            config["model"].get("geometric_depth")):
-        raise ValueError("This script requires legacy exp+PGD without geometric depth")
-    if metadata.get("depth_fuse_logit") is None:
-        raise ValueError("Learned depth_fuse_logit is missing")
-    expected = ["p%d_%s" % (level, field) for level in range(3, 8) for field in FIELDS]
-    actual = [item.name for item in session.get_outputs()]
-    if metadata.get("output_names") != expected or len(actual) != len(expected) or set(actual) != set(expected):
-        raise ValueError("ONNX output names do not match the 0903 raw-head contract")
-    shapes = {item.name: item.shape for item in session.get_outputs()}
-    if any(isinstance(shapes["p%d_bbox" % level][1], int) and
-           shapes["p%d_bbox" % level][1] != 9 for level in range(3, 8)):
-        raise ValueError("0903 legacy bbox output must have 9 channels")
+def _validate_native_shapes(shapes, image_hw, bins=9):
+    if len(shapes) not in (45, 50):
+        raise ValueError("Native HAT requires 45/50 branch-major outputs; got %d. "
+                         "ProjectDetection re-exports are unsupported." % len(shapes))
+    channels = NATIVE_CHANNELS + ((bins,) if len(shapes) == 50 else ())
+    for index, shape in enumerate(shapes):
+        level = index % 5
+        stride = STRIDES[level]
+        expected = [1, channels[index // 5],
+                    (image_hw[0] + stride - 1) // stride,
+                    (image_hw[1] + stride - 1) // stride]
+        if len(shape) != 4 or any(
+                isinstance(actual, (int, np.integer)) and actual != wanted
+                for actual, wanted in zip(shape, expected)):
+            raise ValueError("Native output %d (branch=%d P%d) shape %s; expected %s"
+                             % (index, index // 5, level + 3, shape, expected))
+
+
+def load_contract(session, model_path, pgd_json=None, class_order="bgr",
+                  color_space="bgr", decode_mode="distort"):
+    inputs = session.get_inputs()
+    if (len(inputs) != 1 or inputs[0].type != "tensor(float)" or
+            len(inputs[0].shape) != 4 or inputs[0].shape[:2] != [1, 3] or
+            not all(isinstance(x, int) and x > 0 for x in inputs[0].shape[2:])):
+        raise ValueError("Expected one static float32 NCHW input [1,3,H,W]")
+    image_hw = inputs[0].shape[2:]
+    outputs = session.get_outputs()
+    if session.get_modelmeta().custom_metadata_map.get("project_detection_inference"):
+        raise ValueError("ProjectDetection re-exports are unsupported; use a native HAT ONNX")
+    if len(outputs) not in (45, 50):
+        raise ValueError("Native HAT requires 45/50 outputs; got %d" % len(outputs))
+    pgd = len(outputs) == 50
+    metadata = {"format": "hat_native_branch_major", "pgd_json": None}
+    unit, maximum, bins = 10.0, 80.0, 9
+    if pgd:
+        path = Path(pgd_json) if pgd_json else Path(model_path).with_suffix(".pgd.json")
+        if not path.is_file():
+            raise FileNotFoundError("PGD ONNX requires trained parameters: %s; use --pgd-json" % path)
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        unit, maximum = float(meta["unit"]), float(meta["max"])
+        if not np.isfinite([unit, maximum]).all() or unit <= 0 or maximum < unit:
+            raise ValueError("PGD unit/max must be finite with max >= unit > 0")
+        bins = int(maximum // unit) + 1
+        if meta.get("prob_depth") is False or meta.get("bins", bins) != bins:
+            raise ValueError("PGD JSON prob_depth/bins disagree with unit/max")
+        logit = meta.get("depth_fuse_logit")
+        weight = meta.get("fuse_w")
+        if logit is not None:
+            if not np.isfinite(float(logit)):
+                raise ValueError("depth_fuse_logit must be finite")
+            trained_weight = float(_sigmoid(float(logit)))
+            if weight is not None and not np.isclose(float(weight), trained_weight, atol=1e-6):
+                raise ValueError("PGD fuse_w disagrees with sigmoid(depth_fuse_logit)")
+            weight = trained_weight
+        if weight is None or not np.isfinite(float(weight)) or not 0 <= float(weight) <= 1:
+            raise ValueError("PGD JSON requires trained fuse_w or depth_fuse_logit")
+        metadata.update(fuse_w=float(weight), depth_fuse_logit=logit,
+                        pgd_json=str(path.resolve()))
+    elif pgd_json:
+        raise ValueError("--pgd-json is only valid for 50-output PGD models")
+    _validate_native_shapes([x.shape for x in outputs], image_hw, bins)
+    config = {
+        "data": {"image_size": list(image_hw), "color_space": color_space,
+                 "classes": list(CLASS_NAMES_BGR if class_order == "bgr" else CLASS_NAMES_LEGACY),
+                 "image_mean": [128]*3, "image_std": [128]*3, "pad_value": [0]*3},
+        "model": {"strides": list(STRIDES), "probabilistic_depth": pgd,
+                  "depth_mode": "exp", "depth_bin_unit": unit, "depth_bin_max": maximum},
+        "evaluation": {"score_threshold": 0.05, "nms_threshold": 0.3,
+                       "nms_pre": 1000, "max_per_image": 100, "nms_mode": "classwise",
+                       "decode_mode": decode_mode},
+    }
     return config, metadata
 
 
+def pack_native_outputs(values, config):
+    """Branch-major HAT arrays -> per-level decoder inputs; names are irrelevant."""
+    bins = int(config["model"]["depth_bin_max"] // config["model"]["depth_bin_unit"]) + 1
+    _validate_native_shapes([x.shape for x in values], config["data"]["image_size"], bins)
+    packed = {}
+    for level in range(5):
+        prefix = "p%d_" % (level + 3)
+        packed.update({prefix + "cls": values[level],
+                       prefix + "bbox": np.concatenate([values[branch*5 + level]
+                                                        for branch in range(1, 6)], axis=1),
+                       prefix + "direction": values[30 + level],
+                       prefix + "attribute": values[35 + level],
+                       prefix + "centerness": values[40 + level],
+                       prefix + "depth_logits": values[45 + level] if len(values) == 50 else None})
+    return packed
+
+
 def _undistort(points, k, dist):
-    xd = (points[:, 0] - k[0, 2]) / k[0, 0]
-    yd = (points[:, 1] - k[1, 2]) / k[1, 1]
-    x, y = xd.copy(), yd.copy()
-    k1, k2, p1, p2, k3, k4, k5, k6 = dist
-    for _ in range(6):
-        r2 = x*x + y*y
-        radial = (1 + k1*r2 + k2*r2*r2 + k3*r2*r2*r2) / np.maximum(
-            1 + k4*r2 + k5*r2*r2 + k6*r2*r2*r2, 1e-6)
-        x = (xd - (2*p1*x*y + p2*(r2 + 2*x*x))) / np.maximum(radial, 1e-6)
-        y = (yd - (p1*(r2 + 2*y*y) + 2*p2*x*y)) / np.maximum(radial, 1e-6)
-    return x, y
+    normalized = cv2.undistortPoints(
+        np.asarray(points, np.float64).reshape(-1, 1, 2),
+        np.asarray(k, np.float64), np.asarray(dist, np.float64)).reshape(-1, 2)
+    return normalized[:, 0], normalized[:, 1]
 
 
 def _depth(raw, logits, config, metadata):
-    centers = np.arange(0, config["model"]["depth_bin_max"] +
-                        config["model"]["depth_bin_unit"],
-                        config["model"]["depth_bin_unit"], dtype=np.float32)
+    if logits is None:
+        return np.exp(raw[:, 2]), np.ones(len(raw), np.float32)
+    unit = config["model"]["depth_bin_unit"]
+    centers = np.arange(int(config["model"]["depth_bin_max"] // unit) + 1,
+                        dtype=np.float32) * unit
     if logits.shape[1] != len(centers):
         raise ValueError("Depth-bin count differs from export metadata")
     shifted = logits - logits.max(axis=1, keepdims=True)
     probabilities = np.exp(shifted)
     probabilities /= probabilities.sum(axis=1, keepdims=True)
-    weight = float(_sigmoid(metadata["depth_fuse_logit"]))
+    weight = float(metadata["fuse_w"] if "fuse_w" in metadata else
+                   _sigmoid(metadata["depth_fuse_logit"]))
     depth = (weight * np.exp(raw[:, 2]) +
              (1 - weight) * (probabilities * centers).sum(axis=1))
     confidence = np.partition(probabilities, -2, axis=1)[:, -2:].mean(axis=1)
@@ -240,6 +303,7 @@ def rotated_bev_nms(boxes, scores, threshold):
     if not len(scores):
         return np.empty(0, np.int64)
     bev = boxes[:, [0, 2, 3, 5, 6]].astype(np.float32)
+    bev[:, 4] *= -1  # HAT CameraInstance3DBoxes.bev uses -yaw.
     order = np.argsort(-scores, kind="stable")
     keep = []
     while len(order):
@@ -263,7 +327,7 @@ def _empty_result(level_counts):
 
 
 def postprocess(outputs, target, config, metadata):
-    """Match the repository's FCOS3DPostProcessor._legacy_hat semantics."""
+    """Match native HAT deploy-reference decoding and classwise BEV NMS."""
     evaluation = config["evaluation"]
     class_names = config["data"]["classes"]
     selected_names = evaluation.get("classes")
@@ -275,6 +339,8 @@ def postprocess(outputs, target, config, metadata):
     all_confidences = []
     level_counts = []
     k, dist = target["camera_matrix"], target["dist"]
+    if evaluation.get("decode_mode", "distort") == "pinhole":
+        dist = np.zeros(8, np.float64)
     for level_index, stride in enumerate(config["model"]["strides"]):
         level = level_index + 3
         cls_map = outputs["p%d_cls" % level]
@@ -283,13 +349,14 @@ def postprocess(outputs, target, config, metadata):
         center_map = outputs["p%d_centerness" % level]
         depth_map = outputs["p%d_depth_logits" % level]
         if raw_map.shape[1] != 9 or direction_map.shape[1] != 2:
-            raise ValueError("P%d is not a 0903 legacy HAT output" % level)
+            raise ValueError("P%d is not a native HAT regression output" % level)
         height, width = cls_map.shape[-2:]
         cls = _sigmoid(cls_map[0]).transpose(1, 2, 0).reshape(-1, len(class_names))
         centerness = _sigmoid(center_map[0]).reshape(-1)
         raw = raw_map[0].transpose(1, 2, 0).reshape(-1, 9)
         direction = direction_map[0].transpose(1, 2, 0).reshape(-1, 2).argmax(axis=1)
-        logits = depth_map[0].transpose(1, 2, 0).reshape(-1, depth_map.shape[1])
+        logits = (depth_map[0].transpose(1, 2, 0).reshape(-1, depth_map.shape[1])
+                  if depth_map is not None else None)
         depth, confidence = _depth(raw, logits, config, metadata)
         location_rank = (cls[:, selected_ids] * centerness[:, None] *
                          confidence[:, None]).max(axis=1)
@@ -316,7 +383,7 @@ def postprocess(outputs, target, config, metadata):
                                        centers[:, 0]+half_w, centers[:, 1]+half_h))
         det_scores = cls * centerness[:, None]
         rank_scores = det_scores * confidence[:, None]
-        level_counts.append(int((det_scores[:, selected_ids] >= evaluation["score_threshold"]).sum()))
+        level_counts.append(int((det_scores[:, selected_ids] > evaluation["score_threshold"]).sum()))
         all_boxes.append(boxes)
         all_image_boxes.append(image_boxes)
         all_scores.append(det_scores)
@@ -334,7 +401,7 @@ def postprocess(outputs, target, config, metadata):
     class_ranks, class_labels, class_levels = [], [], []
     class_confidences = []
     for label in selected_ids:
-        valid = scores[:, label] >= evaluation["score_threshold"]
+        valid = scores[:, label] > evaluation["score_threshold"]
         if not valid.any():
             continue
         class_boxes.append(boxes[valid])
@@ -366,9 +433,9 @@ def postprocess(outputs, target, config, metadata):
     boxes, image_boxes, scores = boxes[valid], image_boxes[valid], scores[valid]
     ranking, labels, levels = ranking[valid], labels[valid], levels[valid]
     confidences = confidences[valid]
-    limit = int(evaluation.get("nms_max_candidates", 1000))
+    limit = int(evaluation.get("nms_max_candidates", len(boxes)))
     threshold = float(evaluation["nms_threshold"])
-    mode = evaluation.get("nms_mode", "global")
+    mode = evaluation.get("nms_mode", "classwise")
     if mode == "global":
         selected = np.argsort(-ranking, kind="stable")[:limit]
         kept = selected[rotated_bev_nms(boxes[selected], ranking[selected], threshold)]
@@ -379,7 +446,7 @@ def postprocess(outputs, target, config, metadata):
             selected = indices[np.argsort(-ranking[indices], kind="stable")[:limit]]
             selected_groups.extend(selected[rotated_bev_nms(boxes[selected], ranking[selected], threshold)])
         kept = np.asarray(selected_groups, np.int64)
-    kept = kept[np.argsort(-ranking[kept], kind="stable")[:int(evaluation["max_per_image"])]]
+    kept = kept[np.argsort(-scores[kept], kind="stable")[:int(evaluation["max_per_image"])]]
     return {"boxes3d": boxes[kept].astype(np.float32),
             "boxes2d": image_boxes[kept].astype(np.float32),
             "scores": scores[kept].astype(np.float32), "labels": labels[kept],
@@ -391,13 +458,7 @@ def _camera_corners(box, target):
     x, y, z, length, height, width, yaw = map(float, box[:7])
     rotation, translation = target["r_c2v"], target["t_c2v"]
     center_vehicle = rotation @ np.asarray((x, y, z)) + translation
-    projection = np.asarray(((rotation[0, 0], rotation[1, 0]),
-                             (rotation[0, 2], rotation[1, 2])))
-    heading = np.asarray((math.cos(yaw), math.sin(yaw)))
-    try:
-        heading_vehicle = np.linalg.solve(projection, heading)
-    except np.linalg.LinAlgError:
-        heading_vehicle = np.linalg.lstsq(projection, heading, rcond=None)[0]
+    heading_vehicle = rotation @ np.asarray((math.cos(yaw), 0., -math.sin(yaw)))
     yaw_vehicle = math.atan2(float(heading_vehicle[1]), float(heading_vehicle[0]))
     signs = np.asarray(((-1,-1,-1),(1,-1,-1),(1,1,-1),(-1,1,-1),
                         (-1,-1,1),(1,-1,1),(1,1,1),(-1,1,1)), np.float64)
@@ -629,7 +690,7 @@ def draw_bev(result, classes, size=(700, 700)):
     confidences = result.get("depth_confidence")
     for index, (box, score, label) in enumerate(zip(result["boxes3d"], result["scores"], result["labels"])):
         rectangle = ((float(box[0]), float(box[2])),
-                     (float(box[3]), float(box[5])), math.degrees(float(box[6])))
+                     (float(box[3]), float(box[5])), -math.degrees(float(box[6])))
         points = cv2.boxPoints(rectangle)
         points[:, 0] = width/2 + points[:, 0]/40*(width/2-30)
         points[:, 1] = height-30-points[:, 1]/80*(height-60)
@@ -654,9 +715,9 @@ def draw_bev(result, classes, size=(700, 700)):
 def _image_paths(image, source, output):
     image, source = Path(image), Path(source)
     if source.is_file():
-        path = Path(output or "outputs/onnx_0903_pred.jpg")
+        path = Path(output or "outputs/onnx_hat_pred.jpg")
         return path, path.with_name(path.stem + "_bev" + path.suffix)
-    root = Path(output or "outputs/onnx_0903")
+    root = Path(output or "outputs/onnx_hat")
     if root.is_file():
         raise ValueError("--output must be a directory for folder inference")
     relative = image.relative_to(source)
@@ -686,8 +747,14 @@ def infer(args):
     if missing:
         raise ValueError("Unavailable ONNX Runtime providers: %s" % missing)
     started = perf_counter()
-    session = ort.InferenceSession(args.model, providers=providers)
-    config, metadata = load_contract(session, args.model, args.metadata)
+    options = ort.SessionOptions()
+    options.log_severity_level = 3
+    if args.ort_threads <= 0:
+        raise ValueError("--ort-threads must be positive")
+    options.intra_op_num_threads = args.ort_threads
+    session = ort.InferenceSession(args.model, sess_options=options, providers=providers)
+    config, metadata = load_contract(session, args.model, args.pgd_json,
+                                     args.class_order, args.color_space, args.decode_mode)
     for key, value in (("score_threshold", args.score_threshold),
                        ("nms_threshold", args.nms_threshold),
                        ("nms_pre", args.nms_pre), ("max_per_image", args.max_per_image)):
@@ -696,14 +763,16 @@ def infer(args):
     evaluation = config["evaluation"]
     if not 0 <= evaluation["score_threshold"] <= 1 or not 0 <= evaluation["nms_threshold"] <= 1:
         raise ValueError("Thresholds must be in [0, 1]")
-    if evaluation["nms_pre"] <= 0 or evaluation["max_per_image"] <= 0:
-        raise ValueError("nms-pre and max-per-image must be positive")
+    if evaluation["nms_pre"] == 0 or evaluation["max_per_image"] <= 0:
+        raise ValueError("nms-pre must be positive or negative (unlimited); max-per-image must be positive")
     if args.save_bev and args.no_visualize:
         raise ValueError("--save-bev requires visualization")
     images = collect_images(args.image, args.recursive, args.max_images)
-    names = [item.name for item in session.get_outputs()]
     print("Initialization %.2f ms | ORT=%s | CPU postprocess" % (
         (perf_counter()-started)*1000, session.get_providers()), flush=True)
+    print("Native HAT | outputs=%d | decode=%s | color=%s | class_order=%s | PGD=%s" % (
+        len(session.get_outputs()), args.decode_mode, args.color_space, args.class_order,
+        metadata["pgd_json"] or "off (45 outputs)"), flush=True)
     records = []
     for number, image in enumerate(images, 1):
         started = perf_counter()
@@ -717,7 +786,7 @@ def infer(args):
         if any(not np.isfinite(value).all() for value in values):
             raise FloatingPointError("Non-finite ONNX output for %s" % image)
         started = perf_counter()
-        result = postprocess(dict(zip(names, values)), target, config, metadata)
+        result = postprocess(pack_native_outputs(values, config), target, config, metadata)
         postprocess_ms = (perf_counter()-started)*1000
         camera_path, bev_path, visualization_ms = None, None, None
         if not args.no_visualize:
@@ -752,6 +821,8 @@ def infer(args):
         average["visualization_ms"] = float(np.mean([
             record["timing"]["visualization_ms"] for record in records]))
     summary = {"model": str(Path(args.model).resolve()), "providers": session.get_providers(),
+               "format": metadata["format"], "pgd_json": metadata["pgd_json"],
+               "inference_config": config,
                "num_images": len(records), "average_timing": average, "images": records}
     if args.summary:
         _available_path(args.summary, args.overwrite).write_text(
@@ -769,7 +840,12 @@ def infer(args):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
-    parser.add_argument("--metadata", help="Optional export .meta.json if ONNX metadata was stripped")
+    parser.add_argument("--pgd-json", help="Trained PGD sidecar; defaults to MODEL.pgd.json for 50 outputs")
+    parser.add_argument("--color-space", choices=("bgr", "rgb"), default="bgr")
+    parser.add_argument("--class-order", choices=("bgr", "legacy"), default="bgr",
+                        help="Training class order, independent of input color")
+    parser.add_argument("--decode-mode", choices=("distort", "pinhole"), default="distort",
+                        help="Must match training geometry; default distorted MW3D")
     parser.add_argument("--image", required=True, help="Image or directory")
     parser.add_argument("--calib-path", "--calib", dest="calib_path", required=True)
     parser.add_argument("--extri-path", "--extrinsic", dest="extri_path")
@@ -780,6 +856,7 @@ def build_parser():
     parser.add_argument("--recursive", action="store_true")
     parser.add_argument("--max-images", type=int)
     parser.add_argument("--provider", action="append", dest="providers")
+    parser.add_argument("--ort-threads", type=int, default=4, help="ORT intra-op CPU threads")
     parser.add_argument("--score-threshold", type=float)
     parser.add_argument("--nms-threshold", type=float)
     parser.add_argument("--nms-pre", type=int)

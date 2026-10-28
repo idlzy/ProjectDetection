@@ -477,7 +477,9 @@ def _merge_cop_states(states):
 def evaluate(model, loader, config, device, logger=None):
     logger = _evaluation_logger(logger)
     model.eval(); raw_model = model.module if hasattr(model, "module") else model
-    processor = FCOS3DPostProcessor(raw_model, config)
+    processor = getattr(raw_model, "evaluation_processor", None)
+    if processor is None:
+        processor = FCOS3DPostProcessor(raw_model, config)
     evaluation = config["evaluation"]
     metric = _build_metric(config)
     head_level_stats = bool(evaluation.get("head_level_stats", False))
@@ -667,8 +669,11 @@ def evaluate(model, loader, config, device, logger=None):
             "attribute_prediction_mode": getattr(
                 raw_model.head, "attribute_prediction_mode", "parallel"
             ),
-            "reason": "CoP diagnostics require adaptive mode",
+            "reason": getattr(raw_model, "backend_metadata", {}).get(
+                "cop_reason", "CoP diagnostics require adaptive mode"),
         }
+    if hasattr(raw_model, "backend_metadata"):
+        metrics["inference_backend"] = raw_model.backend_metadata
     return _json_value(metrics)
 
 
@@ -1337,9 +1342,9 @@ def train(config):
             native_crash_handle.close()
 
 
-def evaluate_checkpoint(config, checkpoint_path, split):
-    device = torch.device("cuda" if config["runtime"]["device"] == "cuda" and torch.cuda.is_available() else "cpu")
-    model = build_model(config).to(device); load_checkpoint(checkpoint_path, model, strict=True)
+def evaluate_checkpoint(config, checkpoint_path, split, backend="pytorch", pgd_json=None):
+    from .onnx_evaluation import build_inference_backend
+    model, _, device = build_inference_backend(config, checkpoint_path, backend, pgd_json)
     loader = build_loader(config, split, max_samples=config["runtime"].get("max_%s_samples" % split))
     metrics = evaluate(model, loader, config, device)
     output = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"] / "metrics"

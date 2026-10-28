@@ -23,6 +23,8 @@ def sha256_file(path):
 def main():
     parser = argparse.ArgumentParser(description="Dataset split evaluation")
     parser.add_argument("--config", required=True); parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--backend", choices=("pytorch", "onnx", "hat-onnx"), default="pytorch")
+    parser.add_argument("--pgd-json", help="Native HAT PGD parameters; defaults to MODEL.pgd.json")
     parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--output", help="Write the complete test report JSON here")
     parser.add_argument("--plot-dir", help="Write metric JSON/PNG plots here")
@@ -44,7 +46,7 @@ def main():
     config["evaluation"]["head_level_stats"] = args.head_level_stats
     config["evaluation"]["cop_stats"] = args.cop_stats
     config["evaluation"]["cop_ablation"] = args.cop_ablation
-    metrics = evaluate_checkpoint(config, args.checkpoint, args.split)
+    metrics = evaluate_checkpoint(config, args.checkpoint, args.split, args.backend, args.pgd_json)
     if args.output or args.plot_dir:
         experiment_dir = Path(config["experiment"]["output_dir"]) / config["experiment"]["name"]
         output = Path(args.output) if args.output else experiment_dir / "metrics" / (args.split + "_report.json")
@@ -53,6 +55,8 @@ def main():
         ready_root = Path(config["data"].get("ready_root") or config["data"]["data_root"]).resolve()
         split_manifest = ready_root / "splits" / (args.split + "_frames.jsonl")
         metadata = {
+            "backend": args.backend,
+            "inference_backend": metrics.get("inference_backend", {"backend": "pytorch"}),
             "config": str(Path(args.config).resolve()),
             "checkpoint": str(checkpoint_path),
             "checkpoint_sha256": sha256_file(checkpoint_path),

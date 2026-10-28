@@ -13,9 +13,9 @@ import torch
 
 from project_detection.config import load_config
 from project_detection.data.geometry import project_distorted, vehicle_box_corners
-from project_detection.engine import build_loader, load_checkpoint
-from project_detection.models import build_model, forward_with_targets
-from project_detection.task import FCOS3DPostProcessor
+from project_detection.engine import build_loader
+from project_detection.models import forward_with_targets
+from project_detection.onnx_evaluation import build_inference_backend
 from project_detection.visualization import (
     draw_bev as draw_shared_bev,
     draw_camera_view as draw_shared_camera_view,
@@ -300,6 +300,8 @@ def main():
     parser = argparse.ArgumentParser(description="Visualize predictions on a dataset split")
     parser.add_argument("--config", required=True)
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--backend", choices=("pytorch", "onnx", "hat-onnx"), default="pytorch")
+    parser.add_argument("--pgd-json")
     parser.add_argument("--split", choices=("train", "val", "test"), default="test")
     parser.add_argument("--output-dir")
     parser.add_argument("--max-images", type=int)
@@ -315,13 +317,8 @@ def main():
     args = parser.parse_args()
     overrides = [item for group in args.set for item in group]
     config = load_config(args.config, overrides)
-    device = torch.device(
-        "cuda" if config["runtime"]["device"] == "cuda" and torch.cuda.is_available() else "cpu"
-    )
-    model = build_model(config).to(device)
-    load_checkpoint(args.checkpoint, model, strict=True)
-    model.eval()
-    processor = FCOS3DPostProcessor(model, config)
+    model, processor, device = build_inference_backend(
+        config, args.checkpoint, args.backend, args.pgd_json)
     loader = build_loader(config, args.split, max_samples=None)
     dataset = loader.dataset
     output_dir = Path(args.output_dir) if args.output_dir else Path(

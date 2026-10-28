@@ -48,7 +48,31 @@ COP 分支评估及其混淆矩阵、置信度分布使用同一范围。距离�
 一致，仅保留距离严格小于上限的目标，边界上的目标也排除。启用过滤但缺少有效外参时会报错。
 结果 JSON 会记录 `class_range` 和距离口径；该设置不改变训练样本、推理或可视化输出。
 
-仅本次评估临时启用也可通过支持 `--set` 的评估入口传入：
+评估与可视化支持三种后端：`BACKEND=pytorch`（默认，原命令不变）、
+`BACKEND=onnx`（本工程导出）、`BACKEND=hat-onnx`（原 HAT 原生导出）。
+例如原生 HAT 1027 模型：
+
+```bash
+BACKEND=hat-onnx \
+CHECKPOINT=checkpoints/hat_train/1027/float-mw.onnx \
+PGD_JSON=checkpoints/hat_train/1027/float-mw.pgd.json \
+CONFIG=configs/experiments/fcos3d_exp_pgda_cop_nr_lgc.yaml \
+VIZ_SCORE_THR=0.05 EVAL_SCORE_THR=0.05 SAVE_BEV=1 \
+scripts/run_test_viz_and_eval.sh
+```
+
+本工程 ONNX 使用 `BACKEND=onnx` 和相应 `CHECKPOINT=...onnx`，不传 `PGD_JSON`。
+两种 ONNX 后端均使用 CPU 前向及 NMS，HAT 固定 distort/BGR/BGR 类别顺序；
+PGD JSON 可省略，但 50 输出的 HAT 模型必须存在同名 `.pgd.json`。
+直接调用 `tools/test.py`、`tools/visualize_test.py` 时使用 `--backend` 和 `--pgd-json`。
+`CONFIG` 仍提供数据集、GT 和评估协议；图像尺寸、归一化、类别集合不匹配时直接报错，
+类别顺序按名称映射。ONNX 当前沿用独立解码脚本的支持范围：BGR、exp 深度，
+本工程 `geometric_depth=True` 导出暂不支持。静态 batch=1 模型逐张前向，仍支持多样本数据加载批次。
+split、类别距离过滤、置信度分布和 P3–P7 统计复用统一评估流程；
+ONNX 不具备 COP 分支诊断输出，一键脚本明确跳过 COP 统计及消融。
+报告记录实际后端、预处理、后处理参数和 HAT PGD 文件哈希。
+
+仅本次评估临时启用类别距离过滤时，也可通过支持 `--set` 的评估入口传入：
 
 ```bash
 --set 'evaluation.class_range={car: 50, Pedestrian: 40}'

@@ -58,6 +58,8 @@ fi
 
 CONFIG="${CONFIG:-configs/experiments/fcos3d_r101_fpn_dcn_full_pgd_local.yaml}"
 CHECKPOINT="${CHECKPOINT:-}"
+BACKEND="${BACKEND:-pytorch}"
+PGD_JSON="${PGD_JSON:-}"
 DEVICE_ID="${DEVICE_ID:-0}"
 VIZ_SCORE_THR="${VIZ_SCORE_THR:-0.35}"
 EVAL_SCORE_THR="${EVAL_SCORE_THR:-0.05}"
@@ -76,9 +78,29 @@ PLOT_DIR="${PLOT_DIR:-${RUN_DIR}/plots}"
 HEAD_LEVEL_STATS="${HEAD_LEVEL_STATS:-1}"
 COP_STATS="${COP_STATS:-1}"
 COP_ABLATION="${COP_ABLATION:-1}"
+backend_args=(--backend "${BACKEND}")
+case "${BACKEND}" in
+    pytorch|onnx|hat-onnx) ;;
+    *) echo "[mw3d-test] ERROR: BACKEND must be pytorch, onnx or hat-onnx" >&2; exit 2 ;;
+esac
+if [[ -n "${PGD_JSON}" ]]; then
+    if [[ "${BACKEND}" != "hat-onnx" || ! -f "${PGD_JSON}" ]]; then
+        echo "[mw3d-test] ERROR: PGD_JSON requires hat-onnx and an existing file" >&2
+        exit 2
+    fi
+    backend_args+=(--pgd-json "${PGD_JSON}")
+fi
+if [[ "${BACKEND}" != "pytorch" ]]; then
+    echo "[mw3d-test] ONNX: CPU inference/postprocess; CoP diagnostics unavailable, skipped"
+    COP_STATS=0
+    COP_ABLATION=0
+fi
+if [[ "${BACKEND}" == "hat-onnx" ]]; then
+    echo "[mw3d-test] HAT conventions: decode=distort color=bgr class_order=bgr"
+fi
 
 if [[ -z "${CHECKPOINT}" ]]; then
-    echo "[mw3d-test] ERROR: set CHECKPOINT=/path/to/best.pth" >&2
+    echo "[mw3d-test] ERROR: set CHECKPOINT=/path/to/best.pth or model.onnx" >&2
     exit 1
 fi
 for required in "${CONFIG}" "${CHECKPOINT}"; do
@@ -92,9 +114,14 @@ mkdir -p "${VIZ_DIR}" "$(dirname "${METRIC_JSON}")" "${PLOT_DIR}"
 
 echo "[mw3d-test] config=${CONFIG}"
 echo "[mw3d-test] checkpoint=${CHECKPOINT}"
+echo "[mw3d-test] backend=${BACKEND}"
 echo "[mw3d-test] split=${SPLIT}"
 echo "[mw3d-test] python=${PYTHON_BIN}"
-echo "[mw3d-test] device=${DEVICE_ID}"
+if [[ "${BACKEND}" == "pytorch" ]]; then
+    echo "[mw3d-test] device=${DEVICE_ID}"
+else
+    echo "[mw3d-test] device=cpu provider=CPUExecutionProvider"
+fi
 echo "[mw3d-test] visualizations=${VIZ_DIR}"
 echo "[mw3d-test] metric_json=${METRIC_JSON}"
 echo "[mw3d-test] plots=${PLOT_DIR}"
@@ -106,6 +133,7 @@ fi
 
 if [[ "${SKIP_VIZ:-0}" != "1" ]]; then
     viz_args=(
+        "${backend_args[@]}"
         --config "${CONFIG}"
         --checkpoint "${CHECKPOINT}"
         --split "${SPLIT}"
@@ -147,6 +175,7 @@ fi
 
 if [[ "${SKIP_EVAL:-0}" != "1" ]]; then
     eval_args=(
+        "${backend_args[@]}"
         --config "${CONFIG}"
         --checkpoint "${CHECKPOINT}"
         --split "${SPLIT}"
