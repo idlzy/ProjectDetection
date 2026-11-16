@@ -118,6 +118,68 @@ def load_postprocess_model(config, model_path, checkpoint, device, session):
     return model, source
 
 
+def load_hat_onnx_decoder(config, model_path, pgd_json, session):
+    """Load the native HAT ONNX decoder and map its labels to the project config."""
+    if __package__:
+        from tools import infer_onnx_hat as decoder
+    else:
+        import infer_onnx_hat as decoder
+    from project_detection.onnx_evaluation import normalize_hat_boxes
+
+    contract, metadata = decoder.load_contract(
+        session, model_path, pgd_json=pgd_json,
+        class_order="bgr", color_space="bgr", decode_mode="distort",
+    )
+    expected_data = config["data"]
+    for key, default in (("image_size", None), ("image_mean", [128] * 3),
+                         ("image_std", [128] * 3), ("pad_value", [0] * 3)):
+        if list(expected_data.get(key, default)) != list(contract["data"].get(key, default)):
+            raise ValueError("Dataset %s disagrees with native HAT ONNX preprocessing" % key)
+    if expected_data.get("color_space", "bgr").lower() != "bgr":
+        raise ValueError("Native HAT ONNX rendering requires BGR preprocessing")
+    if list(config["model"]["strides"]) != list(contract["model"]["strides"]):
+        raise ValueError("Dataset FPN strides disagree with native HAT ONNX")
+
+    model_classes = contract["data"]["classes"]
+    dataset_classes = expected_data["classes"]
+    if len(set(dataset_classes)) != len(dataset_classes) or not set(dataset_classes).issubset(model_classes):
+        raise ValueError("Config classes must be a unique subset of native HAT classes")
+    selected = config["evaluation"].get("classes") or dataset_classes
+    if not set(selected).issubset(dataset_classes):
+        raise ValueError("Evaluation classes must be present in config data.classes")
+    contract["evaluation"].update(config["evaluation"])
+    contract["evaluation"]["classes"] = selected
+    # These are native HAT decoding conventions, not project config overrides.
+    contract["evaluation"].update(decode_mode="distort", nms_mode="classwise")
+    result_label_map = {model_classes.index(name): dataset_classes.index(name)
+                        for name in selected}
+    return decoder, normalize_hat_boxes, contract, metadata, result_label_map
+
+
+def postprocess_hat_outputs(decoder, normalize_boxes, values, target, contract,
+                            metadata, label_map):
+    """Decode a native HAT output list into the renderer's Torch result format."""
+    packed = decoder.pack_native_outputs(values, contract)
+    calibration = {
+        "camera_matrix": target["camera_matrix"].detach().cpu().numpy(),
+        "dist": target["distortion"].detach().cpu().numpy(),
+    }
+    result = decoder.postprocess(packed, calibration, contract, metadata)
+    result["boxes3d"] = normalize_boxes(result["boxes3d"])
+    if len(result["labels"]):
+        try:
+            result["labels"] = np.asarray(
+                [label_map[int(label)] for label in result["labels"]], dtype=np.int64
+            )
+        except KeyError as error:
+            raise ValueError("HAT prediction class is missing from config data.classes") from error
+    return {
+        key: torch.from_numpy(np.ascontiguousarray(value))
+        if isinstance(value, np.ndarray) else value
+        for key, value in result.items()
+    }
+
+
 CJK_FONT_CANDIDATES = (
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -403,34 +465,68 @@ def render_test_batches(args):
             raise FileExistsError(
                 "%s already exists; pass --overwrite to replace it" % path
             )
-    device = torch.device(args.postprocess_device)
-    if device.type != "cuda" or not torch.cuda.is_available():
-        raise RuntimeError(
-            "Official rotated-NMS post-processing requires an available CUDA device"
-        )
     session = None
     output_names = None
     pytorch_model = None
+    device = torch.device(args.postprocess_device)
+    hat_decoder = None
+    hat_normalize_boxes = None
+    hat_contract = None
+    hat_metadata = None
+    hat_label_map = None
     if backend == "onnx":
         import onnxruntime as ort
 
         providers = select_providers(
             ort.get_available_providers(), args.providers
         )
-        session = ort.InferenceSession(str(model_path), providers=providers)
-        output_names = [item.name for item in session.get_outputs()]
-        postprocess_model, state_source = load_postprocess_model(
-            config, model_path, args.checkpoint, device, session
+        session_options = ort.SessionOptions()
+        session_options.log_severity_level = 3
+        session_options.intra_op_num_threads = 4
+        session = ort.InferenceSession(
+            str(model_path), sess_options=session_options, providers=providers
         )
-        processor = FCOS3DPostProcessor(postprocess_model, config)
+        output_names = [item.name for item in session.get_outputs()]
+        contract_metadata = session.get_modelmeta().custom_metadata_map
+        is_project_onnx = (
+            "project_detection_inference" in contract_metadata
+            or set(output_names) == set(contract_output_names(config))
+        )
+        if not is_project_onnx and len(output_names) in (45, 50):
+            hat_decoder, hat_normalize_boxes, hat_contract, hat_metadata, hat_label_map = (
+                load_hat_onnx_decoder(config, model_path, args.pgd_json, session)
+            )
+            processor = None
+            postprocess_model = None
+            state_source = hat_metadata.get("pgd_json") or "native HAT ONNX metadata"
+            backend = "hat-onnx"
+        else:
+            if args.pgd_json:
+                raise ValueError("--pgd-json is only valid with native HAT ONNX")
+            if device.type != "cuda" or not torch.cuda.is_available():
+                raise RuntimeError(
+                    "Official rotated-NMS post-processing requires an available CUDA device"
+                )
+            postprocess_model, state_source = load_postprocess_model(
+                config, model_path, args.checkpoint, device, session
+            )
+            processor = FCOS3DPostProcessor(postprocess_model, config)
         runtime_providers = session.get_providers()
     else:
+        if device.type != "cuda" or not torch.cuda.is_available():
+            raise RuntimeError(
+                "Official rotated-NMS post-processing requires an available CUDA device"
+            )
         pytorch_model = build_model(config).to(device)
         load_checkpoint(model_path, pytorch_model, strict=True)
         pytorch_model.eval()
         processor = FCOS3DPostProcessor(pytorch_model, config)
         state_source = str(model_path.resolve())
         runtime_providers = None
+
+    if backend == "hat-onnx":
+        # Native HAT ONNX decoding and rotated BEV NMS run on CPU.
+        device = torch.device("cpu")
 
     summary_records = []
     total = sum(len(records) for records in selected.values())
@@ -459,20 +555,27 @@ def render_test_batches(args):
                     extrinsic_path=extrinsic_path,
                 )
                 with torch.no_grad():
-                    if backend == "onnx":
+                    if backend in ("onnx", "hat-onnx"):
                         input_name = validate_input(session, tensor)
                         runtime_outputs = session.run(
                             None, {input_name: tensor}
                         )
-                        predictions = reconstruct_outputs(
-                            output_names, runtime_outputs, config, device
-                        )
+                        if backend == "hat-onnx":
+                            result = postprocess_hat_outputs(
+                                hat_decoder, hat_normalize_boxes, runtime_outputs,
+                                target, hat_contract, hat_metadata, hat_label_map,
+                            )
+                        else:
+                            predictions = reconstruct_outputs(
+                                output_names, runtime_outputs, config, device
+                            )
+                            result = processor(predictions, [target])[0]
                     else:
                         model_input = torch.from_numpy(tensor).to(device)
                         predictions = forward_with_targets(
                             pytorch_model, model_input, [target]
                         )
-                    result = processor(predictions, [target])[0]
+                        result = processor(predictions, [target])[0]
                 _synchronize(device)
                 camera = draw_camera_view(
                     original.copy(),
@@ -565,10 +668,14 @@ def build_parser():
     )
     parser.add_argument("--config", required=True)
     parser.add_argument(
-        "--model", required=True, help="Raw-head .onnx or checkpoint .pth/.pt"
+        "--model", required=True,
+        help="Project raw-head/native HAT .onnx or checkpoint .pth/.pt",
     )
     parser.add_argument(
         "--checkpoint", help="Optional host post-process .pth for ONNX only"
+    )
+    parser.add_argument(
+        "--pgd-json", help="Trained PGD sidecar for native HAT ONNX; defaults to MODEL.pgd.json"
     )
     parser.add_argument("--data-root", help="Dataset root; defaults to config data.ready_root/data_root")
     parser.add_argument(
