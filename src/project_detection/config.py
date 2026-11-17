@@ -199,10 +199,9 @@ def validate_config(config: Dict[str, Any]) -> None:
     if not 0.0 <= min_precision < 1.0:
         raise ValueError("evaluation.min_precision must be in [0, 1)")
     tp_distance = config["evaluation"].get("tp_distance_threshold", 2.0)
-    if tp_distance not in config["evaluation"]["distance_thresholds"]:
-        raise ValueError(
-            "evaluation.tp_distance_threshold must be one of distance_thresholds"
-        )
+    from .metrics import validate_matching
+    validate_matching(config["evaluation"].get("match_mode", "fix"),
+                      config["evaluation"]["distance_thresholds"], tp_distance)
     if config["evaluation"].get("mean_ap_weight", 5) <= 0:
         raise ValueError("evaluation.mean_ap_weight must be greater than 0")
     evaluated_classes = config["evaluation"].get("classes")

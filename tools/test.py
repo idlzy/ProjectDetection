@@ -68,6 +68,8 @@ def main():
             "ann_batches": config["data"].get("ann_batches"),
             "score_threshold": config["evaluation"]["score_threshold"],
             "distance_thresholds": config["evaluation"]["distance_thresholds"],
+            "match_mode": config["evaluation"].get("match_mode", "fix"),
+            "tp_distance_threshold": config["evaluation"].get("tp_distance_threshold", 2.0),
             "head_level_stats": args.head_level_stats,
             "cop_stats": args.cop_stats,
             "cop_ablation": args.cop_ablation,

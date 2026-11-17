@@ -11,6 +11,23 @@ NDS_TP_TERMS = ("mATE", "mASE", "mAOE")
 DEFAULT_DEPTH_BINS = ((0, 10), (10, 20), (20, 30), (30, 50), (50, 80), (80, 1000000))
 
 
+def validate_matching(match_mode, distance_thresholds, tp_distance_threshold):
+    if match_mode not in ("fix", "relative"):
+        raise ValueError("evaluation.match_mode must be fix or relative")
+    if not isinstance(distance_thresholds, (list, tuple)) or not distance_thresholds:
+        raise ValueError("evaluation.distance_thresholds must be a non-empty list")
+    for value in list(distance_thresholds) + [tp_distance_threshold]:
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0):
+            raise ValueError("Evaluation match thresholds must be finite positive numbers")
+        if match_mode == "relative" and value > 1:
+            raise ValueError("Relative match thresholds must be ratios in (0, 1]")
+    if len(set(distance_thresholds)) != len(distance_thresholds):
+        raise ValueError("evaluation.distance_thresholds must not contain duplicates")
+    if tp_distance_threshold not in distance_thresholds:
+        raise ValueError("evaluation.tp_distance_threshold must be one of distance_thresholds")
+
+
 def _to_owned_numpy(tensor):
     """Copy a tensor into NumPy-owned memory.
 
@@ -82,10 +99,13 @@ class Mw3dMetric:
         evaluated_classes=None,
         tp_threshold=None,
         class_range=None,
+        match_mode="fix",
     ):
         # ``tp_threshold`` remains accepted for callers using the old API.
         if tp_threshold is not None:
             tp_distance_threshold = tp_threshold
+        validate_matching(match_mode, distance_thresholds, tp_distance_threshold)
+        self.match_mode = match_mode
         self.all_class_names = list(class_names)
         self.class_names = (
             list(evaluated_classes)
@@ -129,22 +149,31 @@ class Mw3dMetric:
             labels = _to_owned_numpy(prediction["labels"])
             gt_boxes = _to_owned_numpy(target["boxes3d"])
             gt_labels = _to_owned_numpy(target["labels"])
-            if self._range_by_id:
+            if self._range_by_id or self.match_mode == "relative":
+                reason = "relative matching" if self.match_mode == "relative" else "class_range"
                 required = ("camera_to_vehicle_rotation", "camera_to_vehicle_translation")
                 if any(key not in target for key in required):
-                    raise ValueError("class_range requires camera-to-vehicle rotation and translation in target")
+                    raise ValueError("%s requires camera-to-vehicle rotation and translation in target" % reason)
                 rotation = _to_owned_numpy(target[required[0]]).astype(np.float64)
                 translation = _to_owned_numpy(target[required[1]]).astype(np.float64)
                 if (rotation.shape != (3, 3) or translation.shape != (3,)
                         or not np.isfinite(rotation).all() or not np.isfinite(translation).all()):
-                    raise ValueError("class_range requires finite rotation (3,3) and translation (3,)")
+                    raise ValueError("%s requires finite rotation (3,3) and translation (3,)" % reason)
+            if self._range_by_id:
                 keep = self._range_mask(boxes, labels, rotation, translation)
                 gt_keep = self._range_mask(gt_boxes, gt_labels, rotation, translation)
                 boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
                 gt_boxes, gt_labels = gt_boxes[gt_keep], gt_labels[gt_keep]
             # Store filtered copies so AP, confusion, confidence histograms,
             # head/COP metrics and distributed state all use the same scope.
-            self.samples.append((boxes, scores, labels, gt_boxes, gt_labels))
+            sample = (boxes, scores, labels, gt_boxes, gt_labels)
+            if self.match_mode == "relative":
+                centers_vehicle = gt_boxes[:, :3].astype(np.float64) @ rotation.T + translation
+                gt_distances = np.linalg.norm(centers_vehicle[:, :2], axis=1)
+                if not np.isfinite(gt_distances).all():
+                    raise ValueError("Relative matching requires finite GT distances")
+                sample += (gt_distances,)
+            self.samples.append(sample)
 
     def _range_mask(self, boxes, labels, rotation, translation):
         centers_vehicle = boxes[:, :3].astype(np.float64) @ rotation.T + translation
@@ -160,13 +189,36 @@ class Mw3dMetric:
         return self.samples
 
     def load_state_dict(self, state):
-        self.samples = list(state)
+        samples = list(state)
+        if self.match_mode == "relative" and any(len(sample) != 6 for sample in samples):
+            raise ValueError("Relative metric state requires stored GT vehicle distances")
+        self.samples = samples
+
+    def _select_match(self, distances, candidates, threshold, gt_distances=None):
+        """Return a matched GT and its absolute center error (meters)."""
+        if not len(candidates):
+            return None, float("inf")
+        distances = np.asarray(distances, dtype=np.float64)
+        if self.match_mode == "fix":
+            finite = np.flatnonzero(np.isfinite(distances))
+            if not len(finite):
+                return None, float("inf")
+            position = int(finite[np.argmin(distances[finite])])
+            distance = float(distances[position])
+            return (int(candidates[position]) if distance < threshold else None), distance
+        allowed = gt_distances[np.asarray(candidates)] * threshold
+        valid = np.flatnonzero(np.isfinite(distances) & (distances < allowed))
+        if not len(valid):
+            return None, float("inf")
+        position = int(valid[np.argmin(distances[valid] / allowed[valid])])
+        return int(candidates[position]), float(distances[position])
 
     def _accumulate_class(self, class_id, distance_threshold):
         detections = []
         ground_truth = {}
         num_gt = 0
-        for sample_id, (boxes, scores, labels, gt_boxes, gt_labels) in enumerate(self.samples):
+        for sample_id, sample in enumerate(self.samples):
+            boxes, scores, labels, gt_boxes, gt_labels = sample[:5]
             indices = np.where(gt_labels == class_id)[0]
             ground_truth[sample_id] = {int(index): False for index in indices}
             num_gt += len(indices)
@@ -189,15 +241,12 @@ class Mw3dMetric:
                 index for index, matched in ground_truth[sample_id].items()
                 if not matched
             ]
-            best_index = None
-            best_distance = float("inf")
-            for index in candidates:
-                distance = float(np.linalg.norm(box[[0, 2]] - gt_boxes[index][[0, 2]]))
-                if distance < best_distance:
-                    best_distance = distance
-                    best_index = index
-            # NuScenes uses a strict center-distance comparison.
-            if best_index is not None and best_distance < distance_threshold:
+            distances = [float(np.linalg.norm(box[[0, 2]] - gt_boxes[index][[0, 2]]))
+                         for index in candidates]
+            gt_distances = self.samples[sample_id][5] if self.match_mode == "relative" else None
+            best_index, best_distance = self._select_match(
+                distances, candidates, distance_threshold, gt_distances)
+            if best_index is not None:
                 ground_truth[sample_id][best_index] = True
                 true_positives.append(1.0)
                 false_positives.append(0.0)
@@ -259,14 +308,16 @@ class Mw3dMetric:
         return accumulated
 
     def _confusion_matrix(self):
-        """Score-ordered, class-agnostic 2m matching for diagnostic confusion."""
+        """Score-ordered, class-agnostic matching using the selected TP rule."""
         class_count = len(self.class_names)
         background = class_count
         global_to_local = {
             global_id: local_id for local_id, global_id in enumerate(self.class_ids)
         }
         matrix = np.zeros((class_count + 1, class_count + 1), dtype=np.int64)
-        for boxes, scores, labels, gt_boxes, gt_labels in self.samples:
+        for sample in self.samples:
+            boxes, scores, labels, gt_boxes, gt_labels = sample[:5]
+            gt_distances = sample[5] if self.match_mode == "relative" else None
             pred_indices = np.where(np.isin(labels, self.class_ids))[0]
             gt_indices = np.where(np.isin(gt_labels, self.class_ids))[0]
             selected_boxes = boxes[pred_indices]
@@ -285,15 +336,12 @@ class Mw3dMetric:
                 pairwise_distance = np.empty((len(selected_boxes), len(selected_gt_boxes)))
             for pred_index in np.argsort(-selected_scores, kind="stable"):
                 candidates = np.where(~matched_gt)[0]
-                best_index = None
-                best_distance = float("inf")
-                if candidates.size:
-                    candidate_distances = pairwise_distance[pred_index, candidates]
-                    best_position = int(np.argmin(candidate_distances))
-                    best_index = int(candidates[best_position])
-                    best_distance = float(candidate_distances[best_position])
+                best_index, best_distance = self._select_match(
+                    pairwise_distance[pred_index, candidates], candidates,
+                    self.tp_distance_threshold, gt_distances[gt_indices]
+                    if gt_distances is not None else None)
                 pred_label = global_to_local[int(selected_labels[pred_index])]
-                if best_index is not None and best_distance < self.tp_distance_threshold:
+                if best_index is not None:
                     matched_gt[best_index] = True
                     gt_label = global_to_local[int(selected_gt_labels[best_index])]
                     matrix[gt_label, pred_label] += 1
@@ -335,7 +383,8 @@ class Mw3dMetric:
 
         total_scores = []
         scores_by_class = {class_id: [] for class_id in self.class_ids}
-        for _, scores, labels, _, _ in self.samples:
+        for sample in self.samples:
+            _, scores, labels, _, _ = sample[:5]
             evaluated = np.isin(labels, self.class_ids)
             total_scores.extend(scores[evaluated].tolist())
             for class_id in self.class_ids:
@@ -472,8 +521,14 @@ class Mw3dMetric:
             where=row_totals != 0,
         )
         return {
-            "protocol": PROTOCOL,
-            "nds_variant": NDS_VARIANT,
+            "protocol": PROTOCOL if self.match_mode == "fix" else "mw3d_relative_center_distance",
+            "nds_variant": NDS_VARIANT if self.match_mode == "fix" else "mw3d_relative_3tp",
+            "match_mode": self.match_mode,
+            "distance_thresholds": list(self.distance_thresholds),
+            "threshold_unit": "meters" if self.match_mode == "fix" else "ratio",
+            "relative_distance_reference": "gt_vehicle_xy" if self.match_mode == "relative" else None,
+            "match_error_distance": "camera_xz",
+            "match_comparison": "strict_less_than",
             "nds_tp_terms": list(NDS_TP_TERMS),
             "min_recall": self.min_recall,
             "min_precision": self.min_precision,
@@ -510,6 +565,7 @@ class Mw3dMetric:
                 "rows": "ground_truth",
                 "columns": "prediction",
                 "distance_threshold": self.tp_distance_threshold,
+                "match_mode": self.match_mode,
                 "counts": confusion.tolist(),
                 "normalized_by_gt": normalized_confusion.tolist(),
             },

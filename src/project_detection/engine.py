@@ -352,6 +352,7 @@ def _build_metric(config):
         depth_bins=evaluation.get("depth_bins"),
         evaluated_classes=evaluation.get("classes"),
         class_range=evaluation.get("class_range"),
+        match_mode=evaluation.get("match_mode", "fix"),
     )
 
 

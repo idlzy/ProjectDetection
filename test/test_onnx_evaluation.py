@@ -93,10 +93,17 @@ def target(token):
 
 
 @pytest.mark.parametrize("backend", ["onnx", "hat-onnx"])
-def test_onnx_uses_shared_metric_loop_with_batches_and_level_stats(tmp_path, backend, monkeypatch):
+@pytest.mark.parametrize("match_mode", ["fix", "relative"])
+def test_onnx_uses_shared_metric_loop_with_batches_and_level_stats(tmp_path, backend, monkeypatch, match_mode):
     from project_detection import models
     monkeypatch.setattr(models, "build_model", lambda *a, **kw: pytest.fail("ONNX must not build a torch detector"))
     path, c = constant_model(tmp_path, backend)
+    if match_mode == "relative":
+        c["evaluation"].update(match_mode="relative", distance_thresholds=[.05, .1, .15, .2],
+                               tp_distance_threshold=.1)
+    else:
+        c["evaluation"].update(match_mode="fix", distance_thresholds=[.5, 1., 2., 4.],
+                               tp_distance_threshold=2.)
     # Exercise class-name mapping: model order must not overwrite GT order.
     c["data"]["classes"] = list(reversed(c["data"]["classes"]))
     model, processor, device = build_inference_backend(c, path, backend)
@@ -110,6 +117,7 @@ def test_onnx_uses_shared_metric_loop_with_batches_and_level_stats(tmp_path, bac
         t.update({key: prediction[key].clone() for key in ("boxes3d", "boxes2d", "labels")})
     metrics = evaluate(model, [(images, targets)], c, device)
     assert metrics["num_samples"] == 2
+    assert metrics["match_mode"] == match_mode
     assert metrics["num_tp"] == 2
     assert metrics["mAOE"] == pytest.approx(0, abs=1e-6)
     assert len(metrics["head_level_metrics"]) == 5

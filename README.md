@@ -48,6 +48,31 @@ COP 分支评估及其混淆矩阵、置信度分布使用同一范围。距离�
 一致，仅保留距离严格小于上限的目标，边界上的目标也排除。启用过滤但缺少有效外参时会报错。
 结果 JSON 会记录 `class_range` 和距离口径；该设置不改变训练样本、推理或可视化输出。
 
+中心距离匹配由 `evaluation.match_mode` 控制，默认 `fix`，原配置保持兼容：
+
+```yaml
+evaluation:
+  match_mode: fix
+  distance_thresholds: [0.5, 1.0, 2.0, 4.0]
+  tp_distance_threshold: 2.0
+```
+
+使用相对距离阈值时，复用这两个字段，数值表示比例：
+
+```yaml
+evaluation:
+  match_mode: relative
+  distance_thresholds: [0.05, 0.1, 0.15, 0.2]
+  tp_distance_threshold: 0.1
+```
+
+`relative` 的实际阈值为 GT 中心到车体原点的 XY 水平距离乘以比例，
+例如 GT 距离 100 m、比例 0.1 时，阈值为 10 m；必须提供有效的相机到车体外参。
+预测与 GT 的中心误差仍在相机 XZ 平面计算，使用严格小于比较。
+相对模式按归一化误差选取可匹配 GT，保持置信度排序和一对一匹配。
+AP、TP/FP/FN、混淆矩阵及 head/COP 统计共用该规则，ATE/ADE 仍为米；
+图表显示百分比，报告标记相对匹配协议，不与固定阈值 nuScenes 协议混淆。
+
 评估与可视化支持三种后端：`BACKEND=pytorch`（默认，原命令不变）、
 `BACKEND=onnx`（本工程导出）、`BACKEND=hat-onnx`（原 HAT 原生导出）。
 例如原生 HAT 1027 模型：

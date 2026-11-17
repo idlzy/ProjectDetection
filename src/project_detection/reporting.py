@@ -21,6 +21,12 @@ PURPLE = "#7568B5"
 GRID = "#DCE3EC"
 TEXT = "#263445"
 
+
+def _match_threshold_label(value, payload):
+    if payload.get("match_mode", "fix") == "relative":
+        return "%g%%" % (100 * float(value))
+    return "%g m" % float(value)
+
 plt.rcParams.update({
     "figure.facecolor": "white",
     "axes.facecolor": "#F8FAFC",
@@ -117,7 +123,7 @@ def _map_matrix(metrics, output_path):
     ], dtype=np.float64)
     figure, axis = plt.subplots(figsize=(8.8, max(4.5, 0.48 * len(classes) + 1.8)))
     image = axis.imshow(np.nan_to_num(values), cmap="viridis", vmin=0.0, vmax=1.0, aspect="auto")
-    axis.set_xticks(np.arange(len(thresholds)), [f"{item} m" for item in thresholds])
+    axis.set_xticks(np.arange(len(thresholds)), [_match_threshold_label(item, metrics) for item in thresholds])
     axis.set_yticks(np.arange(len(classes)), classes)
     axis.set_xlabel("Center-distance threshold")
     axis.set_title("AP by class and distance threshold", loc="left", pad=14)
@@ -152,7 +158,7 @@ def _confusion_matrix_plot(payload, output_path):
     axis.set_xlabel("Predicted class")
     axis.set_ylabel("Ground-truth class")
     axis.set_title(
-        f"Detection confusion matrix · < {payload.get('distance_threshold', 2.0):g} m",
+        "Detection confusion matrix · < " + _match_threshold_label(payload.get("distance_threshold", 2.0), payload),
         loc="left", pad=14,
     )
     for row in range(len(labels)):
@@ -192,7 +198,7 @@ def _pr_curves(metrics, output_path):
             recall, precision, linewidth=1.8, alpha=0.92,
             color=palette[valid_index % len(palette)],
             marker=markers[valid_index % len(markers)], markevery=10, markersize=3.8,
-            label=f"{class_name} · AP@{threshold:g}m {class_ap:.3f}",
+            label=f"{class_name} · AP@{_match_threshold_label(threshold, metrics).replace(' m', 'm')} {class_ap:.3f}",
         )
         valid_index += 1
     if valid_precision:
@@ -207,7 +213,7 @@ def _pr_curves(metrics, output_path):
     axis.set_xlabel("Recall")
     axis.set_ylabel("Precision")
     axis.set_title(
-        f"Per-class precision–recall curves · {threshold:g} m",
+        "Per-class precision–recall curves · " + _match_threshold_label(threshold, metrics),
         loc="left", pad=14,
     )
     _decorate_axis(axis, "both")
@@ -229,7 +235,7 @@ def _ap_by_distance_bars(metrics, output_path):
         values = [0.0 if value is None else float(value) for value in raw_values]
         bars = axis.barh(
             positions + offset, values, height=bar_height * 0.88,
-            color=colors[index % len(colors)], label=f"{threshold} m",
+            color=colors[index % len(colors)], label=_match_threshold_label(threshold, metrics),
         )
         for bar, raw_value in zip(bars, raw_values):
             if raw_value is None:
@@ -290,7 +296,7 @@ def _performance_overview(metrics, output_path):
     x_values = np.arange(len(threshold_labels))
     axes[2].plot(x_values, threshold_values, color=GREEN, marker="o", markersize=8, linewidth=2.5)
     axes[2].fill_between(x_values, threshold_values, color=GREEN, alpha=0.12)
-    axes[2].set_xticks(x_values, [f"{label} m" for label in threshold_labels])
+    axes[2].set_xticks(x_values, [_match_threshold_label(label, metrics) for label in threshold_labels])
     axes[2].set_ylim(0, 1)
     axes[2].set_ylabel("Recall")
     axes[2].set_title("Recall by match threshold", loc="left")
@@ -641,6 +647,8 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
     _write_json(plot_dir / "per_class_ap.json", metrics.get("per_class_AP", {}))
     _horizontal_bars(metrics.get("per_class_AP", {}), "Per-class mean AP", plot_dir / "per_class_ap.png")
     map_payload = {
+        "match_mode": metrics.get("match_mode", "fix"),
+        "threshold_unit": metrics.get("threshold_unit", "meters"),
         "class_names": list(metrics.get("per_class_AP_by_distance", {})),
         "distance_thresholds": list(metrics.get("mAP_by_distance", {})),
         "ap": metrics.get("per_class_AP_by_distance", {}),
@@ -677,6 +685,11 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
     _write_json(plot_dir / "plots_index.json", plot_index)
     report_metadata = dict(metadata)
     report_metadata.update({
+        "match_mode": metrics.get("match_mode", "fix"),
+        "distance_thresholds": metrics.get("distance_thresholds", list(metrics.get("mAP_by_distance", {}))),
+        "tp_distance_threshold": metrics.get("tp_distance_threshold", 2.0),
+        "threshold_unit": metrics.get("threshold_unit", "meters"),
+        "relative_distance_reference": metrics.get("relative_distance_reference"),
         "nds_variant": metrics.get("nds_variant", "nusc_cvpr2019_3tp"),
         "nds_tp_terms": metrics.get("nds_tp_terms", ["mATE", "mASE", "mAOE"]),
         "min_recall": metrics.get("min_recall", 0.1),
@@ -686,7 +699,7 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
         "confusion_matrix_note": "Rows=GT, columns=prediction; background includes unmatched GT/predictions.",
     })
     report = {
-        "protocol": "nusc_cvpr2019_formulas_on_mw3d_camera_bev",
+        "protocol": metrics.get("protocol", "nusc_cvpr2019_formulas_on_mw3d_camera_bev"),
         "note": (
             "MW3D data/classes evaluated in camera BEV [x,z] with NuScenes CVPR 2019 "
             "formulas. NDS uses ATE/ASE/AOE only; it is not directly comparable to "
@@ -695,5 +708,8 @@ def write_test_report(metrics, metric_path, plot_dir, metadata):
         "split": split, "metadata": report_metadata, "metrics": metrics,
         "plot_dir": str(plot_dir), "plots": files,
     }
+    if metrics.get("match_mode") == "relative":
+        report["note"] += (" Relative matching uses a ratio of GT vehicle-horizontal distance, "
+                           "not the fixed-distance nuScenes matching protocol.")
     _write_json(metric_path, report)
     return report
